@@ -145,7 +145,8 @@ fn no_more<'a>(mut it: impl Iterator<Item = &'a str>, line: usize) -> Result<(),
     }
 }
 
-/// Parses `L B <id> <price> <qty>`, `M S <id> <qty>`, or `C <id>`.
+/// Parses `L B <id> <price> <qty>`, `M S <id> <qty>`, `C <id>`, or
+/// `R <id> <price> <qty>`.
 pub fn parse_command(text: &str, line: usize) -> Result<Command, JournalError> {
     let mut it = text.split_whitespace();
     let cmd = match it.next() {
@@ -163,10 +164,15 @@ pub fn parse_command(text: &str, line: usize) -> Result<Command, JournalError> {
         Some("C") => Command::Cancel {
             id: num(it.next(), line, "id")?,
         },
+        Some("R") => Command::Replace {
+            id: num(it.next(), line, "id")?,
+            price: num(it.next(), line, "price")?,
+            qty: num(it.next(), line, "qty")?,
+        },
         Some(t) => {
             return Err(err(
                 line,
-                format!("unknown command '{t}' (expected L, M or C)"),
+                format!("unknown command '{t}' (expected L, M, C or R)"),
             ));
         }
         None => return Err(err(line, "empty command")),
@@ -207,6 +213,30 @@ pub fn parse_event(text: &str, line: usize) -> Result<Event, JournalError> {
                 None => return Err(err(line, "missing cancel reason")),
             };
             Event::Cancelled { id, qty, reason }
+        }
+        Some("RPL") => {
+            let id = num(it.next(), line, "id")?;
+            let price = num(it.next(), line, "price")?;
+            let qty = num(it.next(), line, "qty")?;
+            let prev_qty = num(it.next(), line, "prev_qty")?;
+            let kept_priority = match it.next() {
+                Some("keep") => true,
+                Some("requeue") => false,
+                Some(t) => {
+                    return Err(err(
+                        line,
+                        format!("replace priority must be keep or requeue, got '{t}'"),
+                    ));
+                }
+                None => return Err(err(line, "missing replace priority")),
+            };
+            Event::Replaced {
+                id,
+                price,
+                qty,
+                prev_qty,
+                kept_priority,
+            }
         }
         Some(t) => return Err(err(line, format!("unknown event '{t}'"))),
         None => return Err(err(line, "empty event")),
@@ -458,5 +488,54 @@ mod tests {
             Journal::parse("titan-journal v1\nconfig tick=1 min=1 max=2 max_orders=1\nhash zz")
                 .is_err()
         );
+    }
+
+    #[test]
+    fn replace_syntax_round_trips_and_rejects_malformed_lines() {
+        assert_eq!(
+            parse_command("R 7 100 3", 1).unwrap(),
+            Command::Replace {
+                id: 7,
+                price: 100,
+                qty: 3
+            }
+        );
+        assert!(parse_command("R 7 100", 4).unwrap_err().msg.contains("qty"));
+        assert!(
+            parse_command("R 7 100 3 9", 1)
+                .unwrap_err()
+                .msg
+                .contains("trailing")
+        );
+        for line in ["RPL 7 100 3 5 keep", "RPL 7 101 9 5 requeue"] {
+            let ev = parse_event(line, 1).unwrap();
+            assert_eq!(ev.to_string(), line);
+        }
+        assert!(
+            parse_event("RPL 7 100 3 5 maybe", 1)
+                .unwrap_err()
+                .msg
+                .contains("keep or requeue")
+        );
+        assert!(
+            parse_event("RPL 7 100 3 5", 1)
+                .unwrap_err()
+                .msg
+                .contains("priority")
+        );
+        let cmds = parse_commands("L B 1 100 5\nR 1 100 2\nR 1 101 9\n").unwrap();
+        let j = Journal::record(cfg(), &cmds).unwrap();
+        assert_eq!(Journal::parse(&j.to_text()).unwrap(), j_with_lines(&j));
+    }
+
+    /// `Journal::parse` records source line numbers; `record` leaves them 0.
+    fn j_with_lines(j: &Journal) -> Journal {
+        let mut out = j.clone();
+        let mut line = 3; // after header and config
+        for e in &mut out.entries {
+            e.line = line;
+            line += 1 + e.events.len();
+        }
+        out
     }
 }

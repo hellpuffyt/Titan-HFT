@@ -72,13 +72,32 @@ pub enum Command {
         /// Id of the resting order.
         id: OrderId,
     },
+    /// Replace (modify) a resting order's price and/or remaining quantity. The side
+    /// is inherited from the resting order.
+    ///
+    /// * Same price and `qty <=` current remaining quantity: reduced in place, keeps
+    ///   its time priority.
+    /// * Any price change, or a quantity increase: loses priority — it is removed and
+    ///   re-entered at the back of its (new) level, and if the new price crosses the
+    ///   opposite side it matches immediately as the taker.
+    Replace {
+        /// Id of the resting order.
+        id: OrderId,
+        /// New limit price.
+        price: Price,
+        /// New *remaining* quantity (not the original order quantity).
+        qty: Qty,
+    },
 }
 
 impl Command {
     /// The order id this command refers to.
     pub fn id(&self) -> OrderId {
         match *self {
-            Command::Limit { id, .. } | Command::Market { id, .. } | Command::Cancel { id } => id,
+            Command::Limit { id, .. }
+            | Command::Market { id, .. }
+            | Command::Cancel { id }
+            | Command::Replace { id, .. } => id,
         }
     }
 }
@@ -177,6 +196,20 @@ pub enum Event {
         /// Executed quantity.
         qty: Qty,
     },
+    /// A resting order was replaced. If the new price crosses, `Trade` events with
+    /// this order as taker follow.
+    Replaced {
+        /// Order id.
+        id: OrderId,
+        /// New price.
+        price: Price,
+        /// New remaining quantity (before any matching it triggers).
+        qty: Qty,
+        /// Remaining quantity before the replace.
+        prev_qty: Qty,
+        /// `true` if the order kept its place in the queue (in-place reduction).
+        kept_priority: bool,
+    },
     /// Quantity removed without trading.
     Cancelled {
         /// Order id.
@@ -199,6 +232,17 @@ impl fmt::Display for Event {
                 price,
                 qty,
             } => write!(f, "TRADE {taker} {maker} {price} {qty}"),
+            Event::Replaced {
+                id,
+                price,
+                qty,
+                prev_qty,
+                kept_priority,
+            } => write!(
+                f,
+                "RPL {id} {price} {qty} {prev_qty} {}",
+                if kept_priority { "keep" } else { "requeue" }
+            ),
             Event::Cancelled { id, qty, reason } => {
                 write!(f, "CXL {id} {qty} {}", reason.as_str())
             }
@@ -217,6 +261,7 @@ impl fmt::Display for Command {
             } => write!(f, "L {} {id} {price} {qty}", side.code()),
             Command::Market { id, side, qty } => write!(f, "M {} {id} {qty}", side.code()),
             Command::Cancel { id } => write!(f, "C {id}"),
+            Command::Replace { id, price, qty } => write!(f, "R {id} {price} {qty}"),
         }
     }
 }

@@ -48,6 +48,10 @@ pub struct WorkloadConfig {
     pub max_qty: Qty,
     /// Percentage of commands that cancel a previously sent order.
     pub cancel_pct: u64,
+    /// Percentage of commands that replace a previously sent order: half reduce its
+    /// quantity at the same price, half move it to a new price and quantity.
+    /// Default 0, so seeded flows from earlier versions are reproduced exactly.
+    pub replace_pct: u64,
     /// Percentage of commands that are market orders.
     pub market_pct: u64,
 }
@@ -62,6 +66,7 @@ impl Default for WorkloadConfig {
             spread_ticks: 50,
             max_qty: 100,
             cancel_pct: 30,
+            replace_pct: 0,
             market_pct: 10,
         }
     }
@@ -80,19 +85,47 @@ impl WorkloadConfig {
         }
     }
 
+    /// Draws a limit price around `mid`. Consumes exactly two random numbers.
+    fn limit_price(&self, rng: &mut SplitMix64, side: Side, mid: Price) -> Price {
+        let off = rng.below(self.spread_ticks + 1) * self.tick;
+        // Bias each side slightly away from mid so the book builds depth while still
+        // crossing often enough to trade.
+        match (side, rng.below(2) == 0) {
+            (Side::Buy, true) | (Side::Sell, false) => mid.saturating_sub(off).max(self.tick),
+            _ => mid + off,
+        }
+    }
+
     /// Generates the command sequence.
     pub fn generate(&self) -> Vec<Command> {
         let mut rng = SplitMix64::new(self.seed);
         let mut out = Vec::with_capacity(self.commands);
-        let mut sent: Vec<OrderId> = Vec::new();
+        // (id, side, price, qty as sent/last replaced). Entries may refer to orders
+        // that have since filled; commands against them are rejected, as in real flow.
+        let mut sent: Vec<(OrderId, Side, Price, Qty)> = Vec::new();
         let mut next_id: OrderId = 1;
         let mid = self.mid - self.mid % self.tick;
         for _ in 0..self.commands {
             let roll = rng.below(100);
             if roll < self.cancel_pct && !sent.is_empty() {
                 let i = rng.below(sent.len() as u64) as usize;
-                let id = sent.swap_remove(i);
+                let (id, ..) = sent.swap_remove(i);
                 out.push(Command::Cancel { id });
+                continue;
+            }
+            if roll < self.cancel_pct + self.replace_pct && !sent.is_empty() {
+                let i = rng.below(sent.len() as u64) as usize;
+                let (id, side, old_price, old_qty) = sent[i];
+                let (price, qty) = if rng.below(2) == 0 {
+                    (old_price, 1 + rng.below(old_qty))
+                } else {
+                    (
+                        self.limit_price(&mut rng, side, mid),
+                        1 + rng.below(self.max_qty),
+                    )
+                };
+                sent[i] = (id, side, price, qty);
+                out.push(Command::Replace { id, price, qty });
                 continue;
             }
             let side = if rng.below(2) == 0 {
@@ -103,25 +136,17 @@ impl WorkloadConfig {
             let qty = 1 + rng.below(self.max_qty);
             let id = next_id;
             next_id += 1;
-            if roll < self.cancel_pct + self.market_pct {
+            if roll < self.cancel_pct + self.replace_pct + self.market_pct {
                 out.push(Command::Market { id, side, qty });
             } else {
-                let off = rng.below(self.spread_ticks + 1) * self.tick;
-                // Bias each side slightly away from mid so the book builds depth
-                // while still crossing often enough to trade.
-                let price = match (side, rng.below(2) == 0) {
-                    (Side::Buy, true) | (Side::Sell, false) => {
-                        mid.saturating_sub(off).max(self.tick)
-                    }
-                    _ => mid + off,
-                };
+                let price = self.limit_price(&mut rng, side, mid);
                 out.push(Command::Limit {
                     id,
                     side,
                     price,
                     qty,
                 });
-                sent.push(id);
+                sent.push((id, side, price, qty));
             }
         }
         out
@@ -143,6 +168,39 @@ mod tests {
         assert_ne!(c.generate(), other.generate());
     }
 
+    /// Computed with the v0.1.0 generator (commit 1cfd689), before `replace_pct`.
+    const GOLDEN_DEFAULT_FLOW_DIGEST: u64 = 0x194f_f068_ae7a_8f0b;
+
+    #[test]
+    fn replace_pct_zero_reproduces_the_original_flow() {
+        // Golden digest of the default 100k flow, recorded before `replace_pct`
+        // existed (it equals the flow behind tests/fixtures/seed42_5k.*).
+        let flow = WorkloadConfig::default().generate();
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for c in &flow {
+            for b in c.to_string().bytes() {
+                h ^= u64::from(b);
+                h = h.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        assert_eq!(h, GOLDEN_DEFAULT_FLOW_DIGEST);
+    }
+
+    #[test]
+    fn replace_pct_generates_replaces() {
+        let c = WorkloadConfig {
+            commands: 10_000,
+            replace_pct: 20,
+            ..Default::default()
+        };
+        let n = c
+            .generate()
+            .iter()
+            .filter(|c| matches!(c, Command::Replace { .. }))
+            .count();
+        assert!((1_500..2_500).contains(&n), "{n} replaces");
+    }
+
     #[test]
     fn prices_fit_the_suggested_band() {
         let c = WorkloadConfig {
@@ -154,7 +212,7 @@ mod tests {
         let b = c.book_config(16);
         assert!(b.validate().is_ok());
         for cmd in c.generate() {
-            if let Command::Limit { price, .. } = cmd {
+            if let Command::Limit { price, .. } | Command::Replace { price, .. } = cmd {
                 assert!(price >= b.min_price && price <= b.max_price && price % 5 == 0);
             }
         }

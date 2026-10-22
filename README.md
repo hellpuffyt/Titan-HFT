@@ -47,7 +47,7 @@ It is for students, systems programmers learning atomics, and anyone who wants a
 
 ```sh
 git clone https://github.com/hellpuffyt/Titan-HFT && cd Titan-HFT
-cargo test --release                                   # 38 tests incl. property & stress tests
+cargo test --release                                   # 53 tests incl. property & stress tests
 cargo run --release --bin titan -- gen --seed 42 --count 5000 --out flow.cmds
 cargo run --release --bin titan -- run flow.cmds --quiet --journal flow.journal
 cargo run --release --bin titan -- replay flow.journal
@@ -82,7 +82,7 @@ Requires Rust 1.86+ (edition 2024; the library alone needs 1.85, the Criterion d
 **Implemented**
 - `spsc`: bounded, wait-free SPSC queue (power-of-two capacity, cache-padded indices, cached remote index, drops in-flight items on teardown).
 - `book`: per-tick price ladder + non-empty-level bitset + intrusive FIFO per level + slab of nodes + id→node index. All storage is allocated in `OrderBook::new`.
-- `engine`: limit orders, market orders (immediate-or-cancel), cancels, price-time priority, maker-price execution, explicit reject reasons (`zero_qty`, `qty_too_large`, `bad_tick`, `price_out_of_band`, `duplicate_id`, `unknown_order`, `book_full`).
+- `engine`: limit orders, market orders (immediate-or-cancel), cancels, replaces (price and/or quantity; an in-place reduction keeps priority), price-time priority, maker-price execution, explicit reject reasons (`zero_qty`, `qty_too_large`, `bad_tick`, `price_out_of_band`, `duplicate_id`, `unknown_order`, `book_full`).
 - `journal`: text journal of commands + events + final book hash; `verify` replays and reports the first divergence.
 - `workload`: seeded synthetic order flow (SplitMix64), identical on every platform.
 - `pipeline`: producer thread → SPSC → engine thread with back-pressure (spin-retry; never drops).
@@ -92,7 +92,7 @@ Requires Rust 1.86+ (edition 2024; the library alone needs 1.85, the Criterion d
 - Latency harness (`cargo bench --bench latency`). The numbers are honest but host-dependent; see [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 **Planned** (no code yet; see [docs/good-first-issues.md](docs/good-first-issues.md))
-- Modify (amend quantity/price) orders, self-trade prevention, multiple instruments, binary journal format, core pinning in the harness.
+- Self-trade prevention, multiple instruments, binary journal format, core pinning in the harness.
 
 ## Architecture
 
@@ -111,6 +111,8 @@ Details, data structures, and complexity table: [docs/ARCHITECTURE.md](docs/ARCH
 | best bid/ask | O(1) (cached index) |
 | add resting order | O(1) |
 | cancel by id | O(1), plus O(L/64) to find the next best level if the best level empties |
+| replace, same price + smaller qty | O(1) in place (keeps priority) |
+| replace, other cases | cancel cost + O(1) re-insert, plus O(1) per maker order it trades with |
 | fill against best level | O(1) per maker order touched |
 
 ## Matching rules
@@ -122,6 +124,11 @@ Details, data structures, and complexity table: [docs/ARCHITECTURE.md](docs/ARCH
 5. Order ids must be unique among **resting** orders; a fully filled or cancelled id may be reused.
 6. Validation happens before any state change; a rejected command changes nothing.
 7. No self-trade prevention (there is no account concept).
+8. Replace (`R <id> <price> <qty>`) sets a resting order's new price and new **remaining** quantity; the side is unchanged:
+   - same price and quantity ≤ remaining → reduced in place, **keeps** time priority (`RPL … keep`);
+   - any price change or a quantity increase → **loses** priority: re-entered at the back of the level and, if the new price crosses, matched immediately as the taker (`RPL … requeue`, then `TRADE`s);
+   - unknown, filled, or cancelled id → `unknown_order`; invalid values → `zero_qty`, `qty_too_large`, `bad_tick`, `price_out_of_band` (checked in that order, before the id). A rejected replace leaves the order untouched.
+   - Replace never returns `book_full`, because the old node is freed before the new one is taken.
 
 ## Configuration reference
 
@@ -136,7 +143,9 @@ Details, data structures, and complexity table: [docs/ARCHITECTURE.md](docs/ARCH
 
 The band may span at most 2^22 ticks. Order quantity must be in `1 ..= 2^32`.
 
-Command file lines: `L <B|S> <id> <price> <qty>`, `M <B|S> <id> <qty>`, `C <id>`, `# comment`.
+Command file lines: `L <B|S> <id> <price> <qty>`, `M <B|S> <id> <qty>`, `C <id>`, `R <id> <price> <qty>`, `# comment`.
+
+`titan gen --replace-pct N` adds N% replaces to the synthetic flow (default 0, which reproduces 0.1.0 flows byte-for-byte).
 
 ## Testing
 
@@ -147,11 +156,11 @@ cargo +nightly miri test --lib spsc          # Miri UB check of the queue tests
 ```
 
 What the suites cover:
-- **Differential property test** (`tests/properties.rs`): 512 random command sequences per run are compared event-for-event against a deliberately naive reference model. After every command it also checks that the book is never crossed, that quantity is conserved, and that FIFO order holds at each level. A planted bug that splits fills was caught and shrunk to a minimal counterexample during development.
+- **Differential property test** (`tests/properties.rs`): 512 random command sequences per run are compared event-for-event against a deliberately naive reference model. The model covers limit, market, cancel, and replace. After every command it also checks that the book is never crossed, that quantity is conserved (including replace deltas), and that FIFO order holds at each level, with a requeued replace counting as a new arrival. Planted bugs (split fills; a replace that keeps priority on a quantity increase; a requeue that skips matching) were each caught and shrunk to a minimal counterexample during development.
 - **Stress** (`tests/stress.rs`): producer → queue → engine at capacities 1, 2, 64, and 4096 must equal the single-threaded result exactly. Also 2M items through an 8-slot queue, and a leak/double-free check with `Arc` payloads.
-- **Allocation** (`tests/alloc.rs`): a counting global allocator shows 0 allocations while matching 500,000 commands (621,360 trades) after warm-up, and 0 from a cold start.
+- **Allocation** (`tests/alloc.rs`): a counting global allocator shows 0 allocations while matching 500,000 commands (621,360 trades) after warm-up, and 0 from a cold start. With 20% replaces in the flow, it shows 0 allocations over 500,000 commands containing 100,295 replaces.
 - **Loom**: verified to fail with a causality violation when the producer's `tail` store is weakened to `Relaxed`, and to pass with `Release`.
-- **Fixtures**: golden journals replay byte-for-byte; a tampered journal is detected at the right line; malformed inputs report line numbers (CLI exit code 2).
+- **Fixtures**: golden journals replay byte-for-byte (including `replace.cmds`, one scenario per replace rule); a tampered journal is detected at the right line; malformed inputs report line numbers (CLI exit code 2).
 
 ## Benchmarks
 
@@ -193,7 +202,7 @@ All memory is bounded by `BookConfig`. Inputs are validated, and quantities are 
 
 ## Limitations and roadmap
 
-See [docs/LIMITATIONS.md](docs/LIMITATIONS.md). Key points: single instrument, no modify/amend, conservative `book_full` check, fixed price band, no core pinning, and results measured on one machine.
+See [docs/LIMITATIONS.md](docs/LIMITATIONS.md). Key points: single instrument, conservative `book_full` check, fixed price band, no core pinning, and results measured on one machine.
 
 ## Contributing
 

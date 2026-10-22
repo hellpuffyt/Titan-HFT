@@ -95,6 +95,40 @@ fn steady_state_matching_does_not_allocate() {
 }
 
 #[test]
+fn steady_state_matching_with_replaces_does_not_allocate() {
+    // 20% replaces (half in-place reductions, half requeues that may cross).
+    let w = WorkloadConfig {
+        commands: 1_000_000,
+        seed: 11,
+        replace_pct: 20,
+        ..Default::default()
+    };
+    let flow = w.generate();
+    let mut engine = MatchingEngine::new(w.book_config(1 << 17)).unwrap();
+    let mut sink = CountingSink::default();
+    let (warm, hot) = flow.split_at(flow.len() / 2);
+    for &c in warm {
+        engine.process(c, &mut sink);
+    }
+    let replaces = hot
+        .iter()
+        .filter(|c| matches!(c, titan_hft::types::Command::Replace { .. }))
+        .count();
+    let (_, allocs) = count(|| {
+        for &c in hot {
+            engine.process(c, &mut sink);
+        }
+    });
+    println!(
+        "measured {} commands ({replaces} replaces), {} trades, allocations = {allocs}",
+        hot.len(),
+        sink.trades
+    );
+    assert!(replaces > 50_000);
+    assert_eq!(allocs, 0, "replace path allocated {allocs} times");
+}
+
+#[test]
 fn cold_start_matching_does_not_allocate_either() {
     // The book is preallocated, so even the first commands should not allocate.
     let w = WorkloadConfig {

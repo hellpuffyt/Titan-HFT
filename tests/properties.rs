@@ -27,6 +27,52 @@ impl Model {
         let mut out = Vec::new();
         let has = |m: &Model, id| m.resting.iter().any(|o| o.1 == id);
         match cmd {
+            Command::Replace { id, price, qty } => {
+                // Validation order: zero_qty, qty_too_large, (bad_tick: n/a, tick = 1),
+                // price_out_of_band, unknown_order.
+                let reason = if qty == 0 {
+                    Some(RejectReason::ZeroQty)
+                } else if qty > MAX_ORDER_QTY {
+                    Some(RejectReason::QtyTooLarge)
+                } else if !(CFG.min_price..=CFG.max_price).contains(&price) {
+                    Some(RejectReason::PriceOutOfBand)
+                } else if !has(self, id) {
+                    Some(RejectReason::UnknownOrder)
+                } else {
+                    None
+                };
+                if let Some(reason) = reason {
+                    out.push(Event::Rejected { id, reason });
+                    return out;
+                }
+                let i = self.resting.iter().position(|o| o.1 == id).unwrap();
+                let (_, _, side, cur_price, cur_qty) = self.resting[i];
+                if price == cur_price && qty <= cur_qty {
+                    // Reduce in place: arrival sequence unchanged.
+                    self.resting[i].4 = qty;
+                    out.push(Event::Replaced {
+                        id,
+                        price,
+                        qty,
+                        prev_qty: cur_qty,
+                        kept_priority: true,
+                    });
+                    return out;
+                }
+                self.resting.remove(i);
+                out.push(Event::Replaced {
+                    id,
+                    price,
+                    qty,
+                    prev_qty: cur_qty,
+                    kept_priority: false,
+                });
+                let left = self.sweep(id, side, Some(price), qty, &mut out);
+                if left > 0 {
+                    self.seq += 1;
+                    self.resting.push((self.seq, id, side, price, left));
+                }
+            }
             Command::Cancel { id } => match self.resting.iter().position(|o| o.1 == id) {
                 Some(i) => {
                     let o = self.resting.remove(i);
@@ -166,6 +212,7 @@ fn command() -> impl Strategy<Value = Command> {
         6 => (0u64..24, side(), 0u64..23, qty(8)).prop_map(|(id, side, price, qty)| Command::Limit { id, side, price, qty }),
         2 => (0u64..24, side(), qty(15)).prop_map(|(id, side, qty)| Command::Market { id, side, qty }),
         3 => (0u64..24).prop_map(|id| Command::Cancel { id }),
+        4 => (0u64..24, 0u64..23, qty(10)).prop_map(|(id, price, qty)| Command::Replace { id, price, qty }),
     ]
 }
 
@@ -190,8 +237,12 @@ proptest! {
                 match *e {
                     Event::Accepted { .. } => live_qty += match cmd {
                         Command::Limit { qty, .. } | Command::Market { qty, .. } => i128::from(qty),
-                        Command::Cancel { .. } => 0,
+                        Command::Cancel { .. } | Command::Replace { .. } => 0,
                     },
+                    // A replace swaps the remaining quantity for the new one.
+                    Event::Replaced { qty, prev_qty, .. } => {
+                        live_qty += i128::from(qty) - i128::from(prev_qty);
+                    }
                     Event::Trade { qty, .. } => live_qty -= 2 * i128::from(qty),
                     Event::Cancelled { qty, .. } => live_qty -= i128::from(qty),
                     Event::Rejected { .. } => {}
@@ -209,6 +260,12 @@ proptest! {
             // FIFO within each level: arrival order strictly increasing.
             if let Command::Limit { id, .. } = cmd {
                 if engine.book().contains(id) && !arrival.contains_key(&id) {
+                    arrival.insert(id, n as u64);
+                }
+            }
+            // A replace that lost priority re-enters at the back: new arrival time.
+            for e in &got {
+                if let Event::Replaced { id, kept_priority: false, .. } = *e {
                     arrival.insert(id, n as u64);
                 }
             }
