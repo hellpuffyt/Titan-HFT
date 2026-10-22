@@ -1,0 +1,28 @@
+name: Bug report
+description: Something behaves differently from the documented rules, or crashes.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include the exact command and output.
+    validations: { required: true }
+  - type: textarea
+    id: repro
+    attributes:
+      label: Reproducer
+      description: A small command file or journal is ideal (`titan run repro.cmds`).
+      render: text
+    validations: { required: true }
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Which rule in the README's "Matching rules" section is violated?
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, CPU, `rustc -V`, Titan-HFT version or commit.
+    validations: { required: true }
