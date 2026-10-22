@@ -150,6 +150,10 @@ impl Model {
                     });
                 }
             }
+            // `Command` is #[non_exhaustive]. The in-crate canary
+            // `types::tests::variant_canary` stops compiling when a variant is added,
+            // as a reminder to model it here.
+            other => panic!("reference model does not handle {other}; extend tests/properties.rs"),
         }
         out
     }
@@ -238,6 +242,7 @@ proptest! {
                     Event::Accepted { .. } => live_qty += match cmd {
                         Command::Limit { qty, .. } | Command::Market { qty, .. } => i128::from(qty),
                         Command::Cancel { .. } | Command::Replace { .. } => 0,
+                        other => panic!("unmodelled command {other}"),
                     },
                     // A replace swaps the remaining quantity for the new one.
                     Event::Replaced { qty, prev_qty, .. } => {
@@ -246,6 +251,7 @@ proptest! {
                     Event::Trade { qty, .. } => live_qty -= 2 * i128::from(qty),
                     Event::Cancelled { qty, .. } => live_qty -= i128::from(qty),
                     Event::Rejected { .. } => {}
+                    other => panic!("unmodelled event {other}"),
                 }
             }
             let mut resting: i128 = 0;
