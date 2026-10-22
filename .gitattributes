@@ -1,0 +1,3 @@
+tests/fixtures/** text eol=lf
+*.journal text eol=lf
+*.cmds text eol=lf

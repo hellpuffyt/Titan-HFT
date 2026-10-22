@@ -1,0 +1,12 @@
+/target
+*.profraw
+*.profdata
+.env
+.env.*
+.DS_Store
+.idea/
+.vscode/
+*.swp
+# local scratch outputs from the CLI quick start
+/flow.cmds
+/flow.journal

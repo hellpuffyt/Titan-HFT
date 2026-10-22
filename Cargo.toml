@@ -1,0 +1,59 @@
+[package]
+name = "titan-hft"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.86"
+description = "Educational low-latency order-matching engine: SPSC queue, price-time priority book, replayable journal, honest benchmarks"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/hellpuffyt/Titan-HFT"
+readme = "README.md"
+keywords = ["matching-engine", "order-book", "lock-free", "spsc", "benchmark"]
+categories = ["data-structures", "concurrency", "finance"]
+
+[lib]
+name = "titan_hft"
+
+[[bin]]
+name = "titan"
+path = "src/bin/titan.rs"
+
+[dependencies]
+thiserror = "2"
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+proptest = "1"
+hdrhistogram = { version = "7", default-features = false }
+
+[target.'cfg(loom)'.dependencies]
+loom = "0.7"
+
+[[bench]]
+name = "queue"
+harness = false
+
+[[bench]]
+name = "engine"
+harness = false
+
+[[bench]]
+name = "latency"
+harness = false
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
+missing_docs = "warn"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[profile.release]
+debug = 1
+codegen-units = 1
+lto = "thin"
+
+[profile.bench]
+debug = 1
+codegen-units = 1
+lto = "thin"
