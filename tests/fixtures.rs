@@ -30,7 +30,12 @@ fn titan(args: &[&str]) -> (i32, String, String) {
 
 #[test]
 fn golden_journals_replay_exactly() {
-    for name in ["price_time.journal", "seed42_5k.journal"] {
+    for name in [
+        "price_time.journal",
+        "seed42_5k.journal",
+        "replace.journal",
+        "seed7_replace_3k.journal",
+    ] {
         let j = Journal::parse(&read(name)).unwrap();
         assert!(j.verify().is_ok(), "{name} diverged");
     }
@@ -41,6 +46,8 @@ fn recording_the_command_file_reproduces_the_golden_journal_byte_for_byte() {
     for (cmds, golden) in [
         ("price_time.cmds", "price_time.journal"),
         ("seed42_5k.cmds", "seed42_5k.journal"),
+        ("replace.cmds", "replace.journal"),
+        ("seed7_replace_3k.cmds", "seed7_replace_3k.journal"),
     ] {
         let parsed = Journal::parse(&read(golden)).unwrap();
         let commands = journal::parse_commands(&read(cmds)).unwrap();
@@ -62,6 +69,33 @@ fn tampered_journal_is_detected_at_the_right_command() {
 }
 
 #[test]
+fn replace_fixture_shows_every_rule() {
+    let j = Journal::parse(&read("replace.journal")).unwrap();
+    let text = j.to_text();
+    // Rule 1: reduce in place keeps priority.
+    assert!(text.contains("> R 1 100 4\n< RPL 1 100 4 10 keep\n"));
+    // Rule 2: increase requeues; afterwards order 2 fills before order 1.
+    assert!(text.contains("> R 1 100 6\n< RPL 1 100 6 4 requeue\n"));
+    assert!(text.contains("< TRADE 10 2 100 10\n< TRADE 10 1 100 2\n"));
+    // Rule 3: price change requeues and crosses immediately as taker.
+    assert!(text.contains("< RPL 11 103 8 8 requeue\n< TRADE 11 1 100 4\n< TRADE 11 3 103 4\n"));
+    // Rule 4: unknown, filled and cancelled ids.
+    for id in [99, 10, 3] {
+        assert!(
+            text.contains(&format!("< REJ {id} unknown_order\n")),
+            "{id}"
+        );
+    }
+    // Rule 5: invalid values reuse existing reject reasons.
+    for r in ["zero_qty", "qty_too_large", "price_out_of_band"] {
+        assert!(text.contains(&format!("< REJ 20 {r}\n")), "{r}");
+    }
+    // Rule 6: identical replace is a priority-keeping no-op; the order survives.
+    assert!(text.contains("< RPL 20 95 7 7 keep\n"));
+    assert!(j.verify().is_ok());
+}
+
+#[test]
 fn malformed_command_files_are_rejected_with_line_numbers() {
     let cases = [
         ("missing_qty.cmds", 2, "missing qty"),
@@ -70,6 +104,7 @@ fn malformed_command_files_are_rejected_with_line_numbers() {
         ("negative_price.cmds", 1, "price"),
         ("trailing_token.cmds", 1, "trailing"),
         ("overflow_qty.cmds", 1, "qty"),
+        ("replace_missing_qty.cmds", 2, "missing qty"),
     ];
     for (name, line, needle) in cases {
         let e = journal::parse_commands(&read(&format!("malformed/{name}"))).unwrap_err();
@@ -120,5 +155,9 @@ fn cli_run_replay_and_exit_codes() {
     assert_eq!(titan(&["run", "x", "--bogus", "1"]).0, 2);
     assert_eq!(titan(&["run", "x", "--tick", "0"]).0, 2);
     assert_eq!(titan(&["--help"]).0, 0);
+    assert_eq!(titan(&["gen", "--count", "1", "--replace-pct", "61"]).0, 2);
+    let (code, out, _) = titan(&["gen", "--count", "200", "--replace-pct", "50"]);
+    assert_eq!(code, 0);
+    assert!(out.lines().any(|l| l.starts_with("R ")));
     let _ = std::fs::remove_dir_all(&tmp);
 }

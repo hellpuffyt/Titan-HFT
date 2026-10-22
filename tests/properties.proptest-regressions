@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 7c9b71dfac6215b3ac5b971d81956b1e78626fc1ac89fd0db3491ed4a2a88c8f # shrinks to cmds = [Limit { id: 0, side: Buy, price: 1, qty: 4 }, Market { id: 1, side: Sell, qty: 2 }]
+cc 7bb0180135889ad0fc1881c4a4cb6e98f1cf6a370a179d0c705d8054c8998a9f # shrinks to cmds = [Limit { id: 0, side: Buy, price: 0, qty: 0 }, Limit { id: 0, side: Buy, price: 0, qty: 0 }, Limit { id: 0, side: Buy, price: 0, qty: 0 }, Limit { id: 10, side: Buy, price: 3, qty: 1 }, Replace { id: 10, price: 3, qty: 2 }]

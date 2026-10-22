@@ -4,7 +4,7 @@ Concrete, self-contained tasks for new contributors. Comment on (or open) a GitH
 
 1. **Core pinning on Linux in the latency harness.** Add an optional `TITAN_PIN=1` that pins the producer and engine threads to distinct cores with `sched_setaffinity` (behind `cfg(target_os = "linux")`), and print the chosen cores in the metadata block. *Skills: Rust, a little libc.*
 
-2. **Order modify (quantity decrease keeps priority).** Add `Command::Reduce { id, by }`, which decreases a resting order's quantity in place without losing its queue position. Add journal syntax (`R <id> <qty>`), extend the reference model in `tests/properties.rs`, and document the rule. *Skills: Rust; touches engine, journal, tests.*
+2. **Conditional replace.** Add an optional `expected_qty` to `Command::Replace` so a replace is rejected (new reason `stale_replace`) if the order's remaining quantity changed since the client last saw it. This closes the "replace races a partial fill" gap in `docs/LIMITATIONS.md`. Extend the reference model and the journal syntax. *Skills: Rust; touches engine, journal, tests.*
 
 3. **Binary journal format.** Add a compact fixed-width binary encoding of commands and events next to the text one, with a round-trip property test and a `titan convert` subcommand. *Skills: Rust, serialization.*
 

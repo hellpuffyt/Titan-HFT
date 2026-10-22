@@ -4,6 +4,9 @@
 //! Run with `cargo bench --bench latency`. Optional env vars:
 //! `TITAN_RUNS` (default 5), `TITAN_COMMANDS` (default 1_000_000),
 //! `TITAN_ROUNDTRIPS` (default 1_000_000).
+//!
+//! Every engine workload asserts that its timed runs perform zero heap allocations;
+//! the bench exits non-zero otherwise.
 #![allow(missing_docs, clippy::unwrap_used, clippy::expect_used)]
 
 #[path = "support/mod.rs"]
@@ -18,8 +21,8 @@ use hdrhistogram::Histogram;
 use titan_hft::engine::MatchingEngine;
 use titan_hft::pipeline;
 use titan_hft::spsc;
-use titan_hft::types::CountingSink;
-use titan_hft::workload::WorkloadConfig;
+use titan_hft::types::{Command, CountingSink, Event, EventSink};
+use titan_hft::workload::{ReplaceMix, WorkloadConfig};
 
 /// Counts every allocation in the process.
 struct Counting;
@@ -81,17 +84,92 @@ fn timer_overhead() -> Histogram<u64> {
     h
 }
 
-fn engine_latency(runs: u64, commands: usize) {
-    let w = WorkloadConfig {
+/// Command kinds by *outcome* (what the engine did), not by intent.
+const KINDS: [&str; 6] = [
+    "limit",
+    "market",
+    "cancel",
+    "replace_keep",
+    "replace_requeue",
+    "rejected",
+];
+
+/// Counts events (like `CountingSink`) and remembers the first event of the current
+/// command, which identifies its outcome. Never allocates.
+#[derive(Default)]
+struct KindSink {
+    counts: CountingSink,
+    first: Option<Event>,
+}
+
+impl EventSink for KindSink {
+    #[inline]
+    fn emit(&mut self, event: Event) {
+        if self.first.is_none() {
+            self.first = Some(event);
+        }
+        self.counts.emit(event);
+    }
+}
+
+fn kind_of(cmd: Command, first: Option<Event>) -> usize {
+    match (cmd, first) {
+        (_, Some(Event::Rejected { .. })) => 5,
+        (
+            Command::Replace { .. },
+            Some(Event::Replaced {
+                kept_priority: true,
+                ..
+            }),
+        ) => 3,
+        (Command::Replace { .. }, _) => 4,
+        (Command::Limit { .. }, _) => 0,
+        (Command::Market { .. }, _) => 1,
+        (Command::Cancel { .. }, _) => 2,
+        _ => 5,
+    }
+}
+
+fn workloads(commands: usize) -> Vec<(&'static str, WorkloadConfig)> {
+    let base = WorkloadConfig {
         commands,
         ..Default::default()
     };
+    let with = |pct, mix| WorkloadConfig {
+        replace_pct: pct,
+        replace_mix: mix,
+        ..base
+    };
+    vec![
+        ("baseline (replace 0%, = 0.1.0 workload)", base),
+        ("replace 10% mixed", with(10, ReplaceMix::Mixed)),
+        ("replace 30% mixed", with(30, ReplaceMix::Mixed)),
+        ("replace 30% reduce-only", with(30, ReplaceMix::ReduceOnly)),
+        ("replace 30% move-only", with(30, ReplaceMix::MoveOnly)),
+    ]
+}
+
+fn spread(label: &str, values: &mut [f64], unit: &str) {
+    values.sort_by(f64::total_cmp);
+    let (min, max) = (values[0], values[values.len() - 1]);
+    let median = values[values.len() / 2];
+    println!(
+        "{label}: min {min:.2} / median {median:.2} / max {max:.2} {unit}  (max/min = {:.2}, n={})",
+        max / min,
+        values.len()
+    );
+}
+
+/// Per-command latency split by outcome, plus throughput with and without timers,
+/// for one workload. Panics if any timed run allocates.
+fn engine_workload(label: &str, w: &WorkloadConfig, runs: u64) {
     let flow = w.generate();
     let cfg = w.book_config(1 << 20);
     println!(
-        "\n## Engine: per-command latency (single thread, CountingSink, workload seed={} commands={commands})",
-        w.seed
+        "\n## Engine workload: {label}  (seed={} commands={} cancel={}% replace={}% {:?} market={}%)",
+        w.seed, w.commands, w.cancel_pct, w.replace_pct, w.replace_mix, w.market_pct
     );
+    println!("load before: {}", support::load());
     // Warm-up: one full untimed pass (caches, branch predictors, page faults).
     {
         let mut e = MatchingEngine::new(cfg).unwrap();
@@ -101,40 +179,82 @@ fn engine_latency(runs: u64, commands: usize) {
         }
         black_box(sink);
     }
+
+    // Per-command latency by kind.
     let mut all = hist();
+    let mut by_kind: Vec<Histogram<u64>> = KINDS.iter().map(|_| hist()).collect();
+    let mut run_h: Vec<Histogram<u64>> = KINDS.iter().map(|_| hist()).collect();
+    let mut kind_p50: Vec<Vec<u64>> = KINDS
+        .iter()
+        .map(|_| Vec::with_capacity(runs as usize))
+        .collect();
+    let mut kind_p99: Vec<Vec<u64>> = KINDS
+        .iter()
+        .map(|_| Vec::with_capacity(runs as usize))
+        .collect();
+    let mut timed_tput = Vec::with_capacity(runs as usize);
     for run in 1..=runs {
         let mut e = MatchingEngine::new(cfg).unwrap();
         let mut h = hist();
-        let mut sink = CountingSink::default();
+        for rh in &mut run_h {
+            rh.reset();
+        }
+        let mut sink = KindSink::default();
         let before = ALLOCS.load(Ordering::Relaxed);
         let start = Instant::now();
         for &c in &flow {
+            sink.first = None;
             let t = Instant::now();
             e.process(c, &mut sink);
-            h.record(t.elapsed().as_nanos().max(1) as u64).unwrap();
+            let ns = t.elapsed().as_nanos().max(1) as u64;
+            h.record(ns).unwrap();
+            run_h[kind_of(c, sink.first)].record(ns).unwrap();
         }
         let wall = start.elapsed();
         let allocs = ALLOCS.load(Ordering::Relaxed) - before;
-        report(&format!("run {run}"), &h);
+        assert_eq!(allocs, 0, "{label}: run {run} allocated {allocs} times");
+        let tput = flow.len() as f64 / wall.as_secs_f64() / 1e6;
+        timed_tput.push(tput);
+        report(&format!("run {run} (all kinds)"), &h);
         println!(
-            "{:<28} throughput={:.2} M cmd/s (incl. timer overhead)  trades={}  allocations_during_run={allocs}",
-            "",
-            flow.len() as f64 / wall.as_secs_f64() / 1e6,
-            sink.trades
+            "{:<28} throughput={tput:.2} M cmd/s (incl. timer overhead)  trades={}  allocations_during_run={allocs}",
+            "", sink.counts.trades
         );
         all.add(&h).unwrap();
+        for (k, rh) in run_h.iter().enumerate() {
+            if !rh.is_empty() {
+                by_kind[k].add(rh).unwrap();
+                kind_p50[k].push(rh.value_at_quantile(0.50));
+                kind_p99[k].push(rh.value_at_quantile(0.99));
+            }
+        }
     }
-    report("all runs", &all);
-}
+    report("all runs (all kinds)", &all);
+    println!("by outcome, all {runs} runs combined (count is per run):");
+    for (k, name) in KINDS.iter().enumerate() {
+        let h = &by_kind[k];
+        if h.is_empty() {
+            println!("  {name:<16} n=0");
+            continue;
+        }
+        println!(
+            "  {name:<16} n/run={:>7}  p50={:>5}  p95={:>5}  p99={:>5}  p99.9={:>6}  max={:>9}  | per-run p50 {}..{}  p99 {}..{} (ns)",
+            h.len() / runs,
+            h.value_at_quantile(0.50),
+            h.value_at_quantile(0.95),
+            h.value_at_quantile(0.99),
+            h.value_at_quantile(0.999),
+            h.max(),
+            kind_p50[k].iter().min().unwrap(),
+            kind_p50[k].iter().max().unwrap(),
+            kind_p99[k].iter().min().unwrap(),
+            kind_p99[k].iter().max().unwrap(),
+        );
+    }
+    spread("throughput with per-op timers", &mut timed_tput, "M cmd/s");
 
-fn engine_throughput(runs: u64, commands: usize) {
-    let w = WorkloadConfig {
-        commands,
-        ..Default::default()
-    };
-    let flow = w.generate();
-    let cfg = w.book_config(1 << 20);
-    println!("\n## Engine: throughput without per-command timers ({runs} runs + 1 warm-up)");
+    // Throughput without per-command timers.
+    let mut tput = Vec::with_capacity(runs as usize);
     for run in 0..=runs {
         let mut e = MatchingEngine::new(cfg).unwrap();
         let mut sink = CountingSink::default();
@@ -145,16 +265,23 @@ fn engine_throughput(runs: u64, commands: usize) {
         }
         let wall = start.elapsed();
         let allocs = ALLOCS.load(Ordering::Relaxed) - before;
+        assert_eq!(
+            allocs, 0,
+            "{label}: untimed run {run} allocated {allocs} times"
+        );
         black_box(sink);
         if run == 0 {
-            continue;
+            continue; // warm-up
         }
+        let t = flow.len() as f64 / wall.as_secs_f64() / 1e6;
         println!(
-            "run {run}: {:.2} M cmd/s  ({:.1} ns/cmd mean)  allocations_during_run={allocs}",
-            flow.len() as f64 / wall.as_secs_f64() / 1e6,
+            "untimed run {run}: {t:.2} M cmd/s  ({:.1} ns/cmd mean)  allocations_during_run={allocs}",
             wall.as_nanos() as f64 / flow.len() as f64
         );
+        tput.push(t);
     }
+    spread("throughput without timers", &mut tput, "M cmd/s");
+    println!("load after:  {}", support::load());
 }
 
 fn queue_roundtrip(runs: u64, n: u64) {
@@ -239,8 +366,11 @@ fn main() {
     println!("config:  runs={runs} commands={commands} roundtrips={roundtrips}");
     let t = timer_overhead();
     report("timer overhead (now→now)", &t);
-    engine_latency(runs, commands);
-    engine_throughput(runs, commands);
+    for (label, w) in workloads(commands) {
+        engine_workload(label, &w, runs);
+    }
+    println!("\nload before queue/pipeline: {}", support::load());
     queue_roundtrip(runs, roundtrips);
     pipeline_throughput(runs, commands);
+    println!("load at end: {}", support::load());
 }

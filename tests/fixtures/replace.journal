@@ -1,0 +1,43 @@
+titan-journal v1
+config tick=1 min=1 max=100000 max_orders=65536
+> L S 1 100 10
+< ACK 1
+> L S 2 100 10
+< ACK 2
+> L S 3 103 5
+< ACK 3
+> R 1 100 4
+< RPL 1 100 4 10 keep
+> R 1 100 6
+< RPL 1 100 6 4 requeue
+> L B 10 100 12
+< ACK 10
+< TRADE 10 2 100 10
+< TRADE 10 1 100 2
+> L B 11 99 8
+< ACK 11
+> R 11 103 8
+< RPL 11 103 8 8 requeue
+< TRADE 11 1 100 4
+< TRADE 11 3 103 4
+> R 99 100 1
+< REJ 99 unknown_order
+> R 10 100 1
+< REJ 10 unknown_order
+> C 3
+< CXL 3 1 user
+> R 3 103 1
+< REJ 3 unknown_order
+> L B 20 95 7
+< ACK 20
+> R 20 95 0
+< REJ 20 zero_qty
+> R 20 95 4294967297
+< REJ 20 qty_too_large
+> R 20 0 7
+< REJ 20 price_out_of_band
+> R 20 100001 7
+< REJ 20 price_out_of_band
+> R 20 95 7
+< RPL 20 95 7 7 keep
+hash 9d5f6a3ed80b3228
