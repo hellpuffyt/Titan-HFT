@@ -1,0 +1,22 @@
+# Price-time priority walkthrough (used in the README).
+# Three asks: 101 first, then two at the better price 100.
+L S 1 101 5
+L S 2 100 5
+L S 3 100 5
+# A bid for 12 @ 101 takes 2 (5), then 3 (5) at 100 — same price, earlier first —
+# then 2 lots of order 1 at 101. Trades print at the maker's price.
+L B 10 101 12
+# Non-crossing bid rests.
+L B 11 99 4
+# Market sell for 10: fills 4 against bid 11 @ 99, the remaining 6 is cancelled (IOC).
+M S 12 10
+# Cancel the rest of order 1, then try again (unknown).
+C 1
+C 1
+# Rejections never change the book.
+L B 13 99 0
+L B 14 98 1
+L S 14 105 1
+L B 15 0 1
+# Ids are unique among *resting* orders only: order 2 was fully filled, so its id is free.
+L B 2 97 1

@@ -1,0 +1,34 @@
+titan-journal v1
+config tick=1 min=1 max=100000 max_orders=65536
+> L S 1 101 5
+< ACK 1
+> L S 2 100 5
+< ACK 2
+> L S 3 100 5
+< ACK 3
+> L B 10 101 12
+< ACK 10
+< TRADE 10 2 100 5
+< TRADE 10 3 100 5
+< TRADE 10 1 101 2
+> L B 11 99 4
+< ACK 11
+> M S 12 10
+< ACK 12
+< TRADE 12 11 99 4
+< CXL 12 6 ioc
+> C 1
+< CXL 1 3 user
+> C 1
+< REJ 1 unknown_order
+> L B 13 99 0
+< REJ 13 zero_qty
+> L B 14 98 1
+< ACK 14
+> L S 14 105 1
+< REJ 14 duplicate_id
+> L B 15 0 1
+< REJ 15 price_out_of_band
+> L B 2 97 1
+< ACK 2
+hash d7047f180ee3c18a
