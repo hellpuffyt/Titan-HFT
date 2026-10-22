@@ -1,0 +1,27 @@
+uptime before: 10:59  load averages: 21.81 23.35 19.31
+engine/workload_100k_default_mix
+                        time:   [3.0702 ms 3.2012 ms 3.3147 ms]
+                        thrpt:  [30.169 Melem/s 31.239 Melem/s 32.571 Melem/s]
+                        time:   [−4.8740% +2.2394% +9.4347%] (p = 0.55 > 0.05)
+                        thrpt:  [−8.6213% −2.1904% +5.1237%]
+engine/workload_100k_replace10_mixed
+                        time:   [2.7367 ms 2.8247 ms 2.9430 ms]
+                        thrpt:  [33.979 Melem/s 35.402 Melem/s 36.540 Melem/s]
+                        time:   [−9.7341% −5.1965% −0.5508%] (p = 0.04 < 0.05)
+                        thrpt:  [+0.5538% +5.4813% +10.784%]
+engine/workload_100k_replace30_mixed
+                        time:   [2.4872 ms 2.5217 ms 2.5658 ms]
+                        thrpt:  [38.974 Melem/s 39.656 Melem/s 40.207 Melem/s]
+                        time:   [−28.448% −24.430% −19.811%] (p = 0.00 < 0.05)
+                        thrpt:  [+24.705% +32.327% +39.758%]
+engine/workload_100k_replace30_reduce_only
+                        time:   [2.3238 ms 2.3565 ms 2.3923 ms]
+                        thrpt:  [41.800 Melem/s 42.435 Melem/s 43.032 Melem/s]
+                        time:   [−26.450% −24.253% −22.112%] (p = 0.00 < 0.05)
+                        thrpt:  [+28.389% +32.018% +35.962%]
+engine/workload_100k_replace30_move_only
+                        time:   [2.4559 ms 2.5157 ms 2.5835 ms]
+                        thrpt:  [38.707 Melem/s 39.751 Melem/s 40.718 Melem/s]
+                        time:   [−20.643% −18.340% −15.742%] (p = 0.00 < 0.05)
+                        thrpt:  [+18.682% +22.458% +26.012%]
+uptime after: 11:00  load averages: 13.14 20.82 18.61

@@ -178,6 +178,8 @@ Full methodology, raw output, and caveats: [docs/BENCHMARKS.md](docs/BENCHMARKS.
 
 The timer on this machine ticks every ~41.7 ns, so the per-command p50 is at the measurement floor.
 
+Replace-heavy workloads (10% and 30% replaces; reduce-only and move-only mixes), with latency split by outcome, are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md#order-replace-workloads-branch-featorder-replace-2026-10-22). They were measured on a heavily loaded machine, with up to 6× run-to-run spread, so they are reported as spreads, not as stable figures. Every replace run made 0 allocations.
+
 ```sh
 cargo bench --bench latency     # percentile harness with metadata
 cargo bench --bench queue       # Criterion, queue only

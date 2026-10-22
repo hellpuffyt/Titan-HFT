@@ -132,10 +132,116 @@ measured 500000 commands, 621360 trades, book size 18053 -> 36401, allocations =
 
 The counter is checked first by a sanity test (a `vec![1u8; 64]` must register at least one allocation). The claim is limited to what is measured: `MatchingEngine::process` with a non-allocating sink, after `MatchingEngine::new`, with the book within its configured capacity. `MatchingEngine::new` allocates all storage, and passing a `Vec<Event>` sink allocates when the `Vec` grows.
 
+## Order-replace workloads (branch `feat/order-replace`, 2026-10-22)
+
+Everything above this section describes **0.1.0** and is unchanged. This section adds replace-heavy workloads. Everything in it was measured on the same machine and toolchain, with the same profile and method (warm-up pass, 5 timed runs per workload, HDR histograms, allocation counter).
+
+### Read this first: the machine was heavily loaded
+
+Other builds were saturating the machine. The 1-minute load average was **≈ 50 on 10 cores** during harness sessions 1–3, about 40 → 11 across the Criterion runs, and about 10 during harness session 4. The absolute numbers below are **not stable** and must not be quoted as the engine's performance. The *spread* between repeated runs is reported for exactly that reason. In one workload, session 2's median was 6× lower than session 3's. Every timed run below had **0 allocations**; the harness asserts this and would exit non-zero otherwise.
+
+### Workloads
+
+All workloads use seed 42, 1M commands (harness) or 100k commands (Criterion), and the 0.1.0 base mix of 30% cancels and 10% market orders. Only `replace_pct` / `replace_mix` change. Limit orders fill the remainder, so a replace-heavy workload has fewer limit orders.
+
+| Name | `replace_pct` | `replace_mix` |
+|---|---|---|
+| baseline (Criterion id `workload_100k_default_mix`, unchanged from 0.1.0) | 0 | — |
+| replace 10% mixed | 10 | `Mixed` (50/50 same-price reduce / move) |
+| replace 30% mixed | 30 | `Mixed` |
+| replace 30% reduce-only | 30 | `ReduceOnly` |
+| replace 30% move-only | 30 | `MoveOnly` |
+
+**What the generator actually produces.** The generator remembers what it *sent*, not what has since filled, so many replaces (and cancels) target orders that are already gone and are rejected with `unknown_order`. The harness therefore classifies every command by its **outcome**: `limit`, `market`, `cancel` (successful), `replace_keep`, `replace_requeue`, or `rejected` (any rejected command). Measured counts per 1M-command run, from session 1:
+
+| Workload | limit | market | cancel | replace_keep | replace_requeue | rejected |
+|---|---|---|---|---|---|---|
+| baseline | 600,248 | 100,083 | 35,883 | 0 | 0 | 263,786 |
+| replace 10% mixed | 499,542 | 100,328 | 27,914 | 4,605 | 4,616 | 362,995 |
+| replace 30% mixed | 299,659 | 102,086 | 33,561 | 14,589 | 18,954 | 531,151 |
+| replace 30% reduce-only | 300,091 | 101,090 | 24,381 | 21,655 | 2,646 | 550,137 |
+| replace 30% move-only | 299,696 | 102,994 | 33,354 | 162 | 32,724 | 531,070 |
+
+A "reduce" is sometimes a requeue: the generator reduces relative to the quantity it sent, so after a partial fill the new quantity can be *larger* than what remains. A "move" occasionally keeps priority when the random new price equals the old one. Because the workloads differ this much in composition (half as many limit orders at 30%, twice as many cheap rejections), **throughput differences between workloads mostly reflect the command mix, not the cost of a replace.** Use the per-outcome latency rows to compare operation costs.
+
+### Commands
+
+Since this change, the harness runs the per-command and the untimed throughput passes for each workload in turn (the 0.1.0 output above came from the earlier layout, which measured only the baseline). The queue round-trip and pipeline sections are unchanged and still use the baseline workload.
+
+```sh
+uptime; cargo bench --locked --bench latency; uptime     # 4 sessions
+uptime; cargo bench --locked --bench engine; uptime      # 3 invocations
+```
+
+Raw output of every run, including the load before and after each run and each workload section: [`bench-results/2026-10-22-replace/`](bench-results/2026-10-22-replace/). In those files, the `uptime` lines were reduced to time and load averages. In Criterion invocations 2 and 3, the second `time:`/`thrpt:` pair under each benchmark is Criterion's comparison with the previous invocation, not a new measurement. Because the harness sections are short (~1–4 s) and the 1-minute load average is a decaying average, the per-section "load before/after" values often repeat.
+
+### Engine throughput without per-op timers (latency harness, M cmd/s, min / median / max of 5 runs)
+
+| Workload | Session 1 (load ≈ 54→52) | Session 2 (≈ 52→53) | Session 3 (≈ 53→50) | Session 4 (≈ 11→10) |
+|---|---|---|---|---|
+| baseline | 12.70 / 14.80 / 16.53 | 13.22 / 14.27 / 15.10 | 10.82 / 15.20 / 17.11 | 17.59 / 21.15 / 25.26 |
+| replace 10% mixed | 7.64 / 13.18 / 14.16 | **2.25 / 2.79 / 7.17** | 16.93 / 17.68 / 18.62 | 22.75 / 24.33 / 27.59 |
+| replace 30% mixed | 18.45 / 19.19 / 21.01 | 12.47 / 19.60 / 20.42 | 17.18 / 23.30 / 25.19 | 26.13 / 27.23 / 30.91 |
+| replace 30% reduce-only | 20.30 / 21.49 / 21.63 | 11.20 / 13.94 / 19.80 | 22.89 / 24.87 / 27.85 | 31.28 / 32.30 / 34.82 |
+| replace 30% move-only | 13.99 / 19.90 / 20.85 | 16.80 / 18.46 / 21.85 | 23.23 / 24.28 / 25.76 | 29.34 / 30.70 / 30.80 |
+
+- The session-2 "replace 10% mixed" collapse (2.79 vs 17.68 M cmd/s median in session 3, with an identical command stream processed by a deterministic engine) is host interference, not engine behavior.
+- At lower load (session 4) the baseline median, 21.15 M cmd/s, is within reach of the 0.1.0 measurement of the same workload (23.0–28.6 M cmd/s at load 10–15, above). At load ≈ 50 it was 14–15 M cmd/s.
+
+### Per-command latency by outcome (ns, p50 / p99, all 5 runs of a session combined)
+
+The timer resolution is ~41.7 ns (see above), so values of 41–42 ns mean "at most one timer tick". The full p50/p95/p99/p99.9/max rows and per-run p50/p99 ranges are in the raw files.
+
+| Workload | Outcome | S1 | S2 | S3 | S4 |
+|---|---|---|---|---|---|
+| baseline | limit | 83 / 250 | 84 / 250 | 84 / 291 | 83 / 209 |
+| baseline | cancel | 291 / 500 | 292 / 500 | 292 / 542 | 209 / 458 |
+| replace 10% mixed | replace_keep | 250 / 541 | 291 / 500 | 250 / 459 | 167 / 375 |
+| replace 10% mixed | replace_requeue | 333 / 625 | 333 / 625 | 292 / 542 | 208 / 417 |
+| replace 30% mixed | replace_keep | 42 / 167 | 42 / 208 | 42 / 125 | 42 / 84 |
+| replace 30% mixed | replace_requeue | 125 / 291 | 125 / 292 | 84 / 250 | 83 / 208 |
+| replace 30% reduce-only | replace_keep | 42 / 167 | 42 / 209 | 42 / 208 | 42 / 84 |
+| replace 30% reduce-only | replace_requeue | 125 / 250 | 125 / 292 | 125 / 250 | 83 / 167 |
+| replace 30% move-only | replace_requeue | 84 / 250 | 84 / 292 | 84 / 291 | 83 / 167 |
+
+Session 1, the full rows for one workload (raw):
+
+```text
+## Engine workload: replace 30% mixed  (seed=42 commands=1000000 cancel=30% replace=30% Mixed market=10%)
+by outcome, all 5 runs combined (count is per run):
+  limit            n/run= 299659  p50=  125  p95=  208  p99=  250  p99.9=   458  max=  2316287  | per-run p50 84..125  p99 250..292 (ns)
+  market           n/run= 102086  p50=   84  p95=  208  p99=  291  p99.9=   542  max=  1320959  | per-run p50 83..125  p99 250..292 (ns)
+  cancel           n/run=  33561  p50=   42  p95=  125  p99=  208  p99.9=   417  max=   898047  | per-run p50 42..42  p99 208..208 (ns)
+  replace_keep     n/run=  14589  p50=   42  p95=   84  p99=  167  p99.9=   500  max=   120383  | per-run p50 42..42  p99 166..208 (ns)
+  replace_requeue  n/run=  18954  p50=  125  p95=  167  p99=  291  p99.9=   583  max=   297727  | per-run p50 84..125  p99 250..291 (ns)
+  rejected         n/run= 531151  p50=   41  p95=   42  p99=   84  p99.9=   167  max=   565759  | per-run p50 41..41  p99 84..84 (ns)
+throughput with per-op timers: min 6.40 / median 7.48 / max 7.81 M cmd/s  (max/min = 1.22, n=5)
+throughput without timers: min 18.45 / median 19.19 / max 21.01 M cmd/s  (max/min = 1.14, n=5)
+```
+
+What the measurements support:
+- **An in-place reduce (`replace_keep`) is the cheapest successful book operation measured.** In the 30% workloads it sat at the timer floor at p50 in every session. A requeue was 83–125 ns at p50 in the 30% workloads (two to three ticks), consistent with unlink + insert (+ matching when it crosses). In the 10% workload, both replace outcomes were slower (keep 167–291 ns, requeue 208–333 ns), in line with that workload's slower cancels; see the next point.
+- **Both replace paths allocate nothing**, across every run of every workload (asserted), and in `tests/alloc.rs`.
+- **Successful operations (cancel, replace_keep) are several times slower in the baseline and 10% workloads than in the 30% workloads** (cancel p50 ≈ 290 ns vs 42 ns). This was measured, but its cause has **not been investigated**. One hypothesis is that the baseline grows a larger resting book, which means more cache misses on the id index and the ladder. It is untested, and the book sizes were not recorded in these runs.
+
+What they do **not** support: any absolute "Titan does N replaces/s" claim, or ranking workloads by throughput as if they differed only in replace cost.
+
+### Criterion engine bench (3 invocations, 100k commands, 30 samples each)
+
+| Benchmark | Inv. 1 (load 40→23) | Inv. 2 (22→13) | Inv. 3 (13→11) | max/min |
+|---|---|---|---|---|
+| `workload_100k_default_mix` (0.1.0 baseline id) | 28.71 | 31.24 | 29.52 | 1.09 |
+| `workload_100k_replace10_mixed` | 30.65 | 35.40 | 34.78 | 1.15 |
+| `workload_100k_replace30_mixed` | 27.22 | 39.66 | 30.43 | 1.46 |
+| `workload_100k_replace30_reduce_only` | 31.54 | 42.44 | 30.22 | 1.40 |
+| `workload_100k_replace30_move_only` | 33.57 | 39.75 | 30.20 | 1.32 |
+
+Values are Criterion point estimates in M commands/s. The confidence intervals are in the raw files. The 0.1.0 baseline measured 36.7 M cmd/s under lighter load; run-to-run variation of up to 1.46× between invocations here means the two cannot be compared meaningfully.
+
 ## Reproducing
 
 ```sh
-cargo bench --bench latency
+cargo bench --bench latency                 # includes the replace workloads
 TITAN_RUNS=10 TITAN_COMMANDS=2000000 cargo bench --bench latency   # knobs
 cargo bench --bench queue
 cargo bench --bench engine
