@@ -1,0 +1,170 @@
+=== harness session 3: uptime before: 10:57  load averages: 53.04 26.12 19.67
+# Titan-HFT latency report
+machine: cpu=Apple M5 | logical_cores=10 | ram_gib=16 | os=macOS 27.0.1 | arch=aarch64
+build:   rustc 1.98.0 (88d9e12ae 2026-08-18) | profile=optimized (bench profile: opt-level=3, lto=thin, codegen-units=1)
+config:  runs=5 commands=1000000 roundtrips=1000000
+timer overhead (now→now)     n=  1000000  p50=    41  p95=    42  p99=    42  p99.9=    125  max=   132991  (ns)
+
+## Engine workload: baseline (replace 0%, = 0.1.0 workload)  (seed=42 commands=1000000 cancel=30% replace=0% Mixed market=10%)
+load before: load averages: 53.04 26.12 19.67
+run 1 (all kinds)            n=  1000000  p50=    83  p95=   208  p99=   333  p99.9=    541  max=   185983  (ns)
+                             throughput=6.16 M cmd/s (incl. timer overhead)  trades=622273  allocations_during_run=0
+run 2 (all kinds)            n=  1000000  p50=    83  p95=   208  p99=   334  p99.9=    542  max= 11059199  (ns)
+                             throughput=5.26 M cmd/s (incl. timer overhead)  trades=622273  allocations_during_run=0
+run 3 (all kinds)            n=  1000000  p50=    84  p95=   250  p99=   375  p99.9=    708  max= 21577727  (ns)
+                             throughput=3.49 M cmd/s (incl. timer overhead)  trades=622273  allocations_during_run=0
+run 4 (all kinds)            n=  1000000  p50=    84  p95=   250  p99=   375  p99.9=    625  max=  4968447  (ns)
+                             throughput=5.15 M cmd/s (incl. timer overhead)  trades=622273  allocations_during_run=0
+run 5 (all kinds)            n=  1000000  p50=    84  p95=   250  p99=   416  p99.9=   1459  max=  4075519  (ns)
+                             throughput=4.63 M cmd/s (incl. timer overhead)  trades=622273  allocations_during_run=0
+all runs (all kinds)         n=  5000000  p50=    83  p95=   209  p99=   375  p99.9=    667  max= 21577727  (ns)
+by outcome, all 5 runs combined (count is per run):
+  limit            n/run= 600248  p50=   84  p95=  208  p99=  291  p99.9=   708  max=  6922239  | per-run p50 83..125  p99 250..292 (ns)
+  market           n/run= 100083  p50=   84  p95=  250  p99=  375  p99.9=   750  max= 21577727  | per-run p50 83..125  p99 333..375 (ns)
+  cancel           n/run=  35883  p50=  292  p95=  458  p99=  542  p99.9= 12375  max=   570879  | per-run p50 250..333  p99 458..584 (ns)
+  replace_keep     n=0
+  replace_requeue  n=0
+  rejected         n/run= 263786  p50=   42  p95=  166  p99=  209  p99.9=   334  max= 16842751  | per-run p50 42..83  p99 167..250 (ns)
+throughput with per-op timers: min 3.49 / median 5.15 / max 6.16 M cmd/s  (max/min = 1.76, n=5)
+untimed run 1: 11.99 M cmd/s  (83.4 ns/cmd mean)  allocations_during_run=0
+untimed run 2: 10.82 M cmd/s  (92.4 ns/cmd mean)  allocations_during_run=0
+untimed run 3: 15.75 M cmd/s  (63.5 ns/cmd mean)  allocations_during_run=0
+untimed run 4: 17.11 M cmd/s  (58.5 ns/cmd mean)  allocations_during_run=0
+untimed run 5: 15.20 M cmd/s  (65.8 ns/cmd mean)  allocations_during_run=0
+throughput without timers: min 10.82 / median 15.20 / max 17.11 M cmd/s  (max/min = 1.58, n=5)
+load after:  load averages: 53.04 26.12 19.67
+
+## Engine workload: replace 10% mixed  (seed=42 commands=1000000 cancel=30% replace=10% Mixed market=10%)
+load before: load averages: 53.04 26.12 19.67
+run 1 (all kinds)            n=  1000000  p50=    42  p95=   167  p99=   292  p99.9=    541  max=   150911  (ns)
+                             throughput=6.47 M cmd/s (incl. timer overhead)  trades=547567  allocations_during_run=0
+run 2 (all kinds)            n=  1000000  p50=    83  p95=   167  p99=   333  p99.9=    500  max=   117567  (ns)
+                             throughput=6.51 M cmd/s (incl. timer overhead)  trades=547567  allocations_during_run=0
+run 3 (all kinds)            n=  1000000  p50=    83  p95=   167  p99=   333  p99.9=    542  max=   304383  (ns)
+                             throughput=6.42 M cmd/s (incl. timer overhead)  trades=547567  allocations_during_run=0
+run 4 (all kinds)            n=  1000000  p50=    83  p95=   208  p99=   333  p99.9=    542  max=  1260543  (ns)
+                             throughput=5.92 M cmd/s (incl. timer overhead)  trades=547567  allocations_during_run=0
+run 5 (all kinds)            n=  1000000  p50=    83  p95=   208  p99=   333  p99.9=    583  max=   560639  (ns)
+                             throughput=6.06 M cmd/s (incl. timer overhead)  trades=547567  allocations_during_run=0
+all runs (all kinds)         n=  5000000  p50=    83  p95=   208  p99=   333  p99.9=    542  max=  1260543  (ns)
+by outcome, all 5 runs combined (count is per run):
+  limit            n/run= 499542  p50=   83  p95=  167  p99=  250  p99.9=   500  max=  1260543  | per-run p50 83..84  p99 250..250 (ns)
+  market           n/run= 100328  p50=   83  p95=  208  p99=  333  p99.9=   708  max=   304383  | per-run p50 83..84  p99 292..334 (ns)
+  cancel           n/run=  27914  p50=  250  p95=  375  p99=  459  p99.9= 10423  max=   143615  | per-run p50 209..250  p99 417..500 (ns)
+  replace_keep     n/run=   4605  p50=  250  p95=  375  p99=  459  p99.9=  5583  max=    73727  | per-run p50 209..250  p99 417..500 (ns)
+  replace_requeue  n/run=   4616  p50=  292  p95=  458  p99=  542  p99.9= 12423  max=   102271  | per-run p50 250..333  p99 542..584 (ns)
+  rejected         n/run= 362995  p50=   42  p95=  125  p99=  167  p99.9=   292  max=   293119  | per-run p50 42..42  p99 167..208 (ns)
+throughput with per-op timers: min 5.92 / median 6.42 / max 6.51 M cmd/s  (max/min = 1.10, n=5)
+untimed run 1: 16.93 M cmd/s  (59.1 ns/cmd mean)  allocations_during_run=0
+untimed run 2: 17.89 M cmd/s  (55.9 ns/cmd mean)  allocations_during_run=0
+untimed run 3: 17.34 M cmd/s  (57.7 ns/cmd mean)  allocations_during_run=0
+untimed run 4: 17.68 M cmd/s  (56.6 ns/cmd mean)  allocations_during_run=0
+untimed run 5: 18.62 M cmd/s  (53.7 ns/cmd mean)  allocations_during_run=0
+throughput without timers: min 16.93 / median 17.68 / max 18.62 M cmd/s  (max/min = 1.10, n=5)
+load after:  load averages: 53.04 26.12 19.67
+
+## Engine workload: replace 30% mixed  (seed=42 commands=1000000 cancel=30% replace=30% Mixed market=10%)
+load before: load averages: 53.04 26.12 19.67
+run 1 (all kinds)            n=  1000000  p50=    42  p95=   166  p99=   209  p99.9=    375  max=   914943  (ns)
+                             throughput=7.80 M cmd/s (incl. timer overhead)  trades=341390  allocations_during_run=0
+run 2 (all kinds)            n=  1000000  p50=    42  p95=   125  p99=   208  p99.9=    334  max=   229247  (ns)
+                             throughput=8.16 M cmd/s (incl. timer overhead)  trades=341390  allocations_during_run=0
+run 3 (all kinds)            n=  1000000  p50=    42  p95=   125  p99=   208  p99.9=    292  max=  1219583  (ns)
+                             throughput=8.72 M cmd/s (incl. timer overhead)  trades=341390  allocations_during_run=0
+run 4 (all kinds)            n=  1000000  p50=    42  p95=   125  p99=   208  p99.9=    292  max=   141439  (ns)
+                             throughput=8.63 M cmd/s (incl. timer overhead)  trades=341390  allocations_during_run=0
+run 5 (all kinds)            n=  1000000  p50=    42  p95=   125  p99=   208  p99.9=    375  max=   200575  (ns)
+                             throughput=8.51 M cmd/s (incl. timer overhead)  trades=341390  allocations_during_run=0
+all runs (all kinds)         n=  5000000  p50=    42  p95=   125  p99=   208  p99.9=    334  max=  1219583  (ns)
+by outcome, all 5 runs combined (count is per run):
+  limit            n/run= 299659  p50=   84  p95=  167  p99=  250  p99.9=   416  max=   385023  | per-run p50 83..84  p99 209..250 (ns)
+  market           n/run= 102086  p50=   83  p95=  167  p99=  250  p99.9=   500  max=   131839  | per-run p50 83..83  p99 250..250 (ns)
+  cancel           n/run=  33561  p50=   42  p95=   84  p99=  167  p99.9=   417  max=   227711  | per-run p50 42..42  p99 167..208 (ns)
+  replace_keep     n/run=  14589  p50=   42  p95=   84  p99=  125  p99.9=   375  max=    27711  | per-run p50 42..42  p99 125..208 (ns)
+  replace_requeue  n/run=  18954  p50=   84  p95=  167  p99=  250  p99.9=   500  max=   229247  | per-run p50 84..125  p99 209..250 (ns)
+  rejected         n/run= 531151  p50=   41  p95=   42  p99=   84  p99.9=   167  max=  1219583  | per-run p50 41..41  p99 83..84 (ns)
+throughput with per-op timers: min 7.80 / median 8.51 / max 8.72 M cmd/s  (max/min = 1.12, n=5)
+untimed run 1: 17.18 M cmd/s  (58.2 ns/cmd mean)  allocations_during_run=0
+untimed run 2: 23.05 M cmd/s  (43.4 ns/cmd mean)  allocations_during_run=0
+untimed run 3: 23.86 M cmd/s  (41.9 ns/cmd mean)  allocations_during_run=0
+untimed run 4: 23.30 M cmd/s  (42.9 ns/cmd mean)  allocations_during_run=0
+untimed run 5: 25.19 M cmd/s  (39.7 ns/cmd mean)  allocations_during_run=0
+throughput without timers: min 17.18 / median 23.30 / max 25.19 M cmd/s  (max/min = 1.47, n=5)
+load after:  load averages: 51.83 26.32 19.78
+
+## Engine workload: replace 30% reduce-only  (seed=42 commands=1000000 cancel=30% replace=30% ReduceOnly market=10%)
+load before: load averages: 51.83 26.32 19.78
+run 1 (all kinds)            n=  1000000  p50=    42  p95=   167  p99=   209  p99.9=    375  max=  2275327  (ns)
+                             throughput=7.05 M cmd/s (incl. timer overhead)  trades=358418  allocations_during_run=0
+run 2 (all kinds)            n=  1000000  p50=    42  p95=   167  p99=   250  p99.9=    500  max=  2818047  (ns)
+                             throughput=5.38 M cmd/s (incl. timer overhead)  trades=358418  allocations_during_run=0
+run 3 (all kinds)            n=  1000000  p50=    42  p95=   125  p99=   208  p99.9=    375  max=   314367  (ns)
+                             throughput=8.57 M cmd/s (incl. timer overhead)  trades=358418  allocations_during_run=0
+run 4 (all kinds)            n=  1000000  p50=    42  p95=   166  p99=   209  p99.9=    416  max=   904703  (ns)
+                             throughput=6.94 M cmd/s (incl. timer overhead)  trades=358418  allocations_during_run=0
+run 5 (all kinds)            n=  1000000  p50=    42  p95=   125  p99=   208  p99.9=    375  max=   148991  (ns)
+                             throughput=8.28 M cmd/s (incl. timer overhead)  trades=358418  allocations_during_run=0
+all runs (all kinds)         n=  5000000  p50=    42  p95=   166  p99=   209  p99.9=    416  max=  2818047  (ns)
+by outcome, all 5 runs combined (count is per run):
+  limit            n/run= 300091  p50=   84  p95=  167  p99=  250  p99.9=   583  max=  2818047  | per-run p50 83..125  p99 250..250 (ns)
+  market           n/run= 101090  p50=   84  p95=  208  p99=  291  p99.9=   625  max=   593407  | per-run p50 83..84  p99 250..292 (ns)
+  cancel           n/run=  24381  p50=   42  p95=  125  p99=  250  p99.9=   458  max=   125183  | per-run p50 42..42  p99 208..250 (ns)
+  replace_keep     n/run=  21655  p50=   42  p95=   84  p99=  208  p99.9=   417  max=   107391  | per-run p50 42..42  p99 167..209 (ns)
+  replace_requeue  n/run=   2646  p50=  125  p95=  167  p99=  250  p99.9=   459  max=   104063  | per-run p50 84..125  p99 209..292 (ns)
+  rejected         n/run= 550137  p50=   41  p95=   42  p99=  125  p99.9=   167  max=  1236991  | per-run p50 41..41  p99 84..125 (ns)
+throughput with per-op timers: min 5.38 / median 7.05 / max 8.57 M cmd/s  (max/min = 1.59, n=5)
+untimed run 1: 27.70 M cmd/s  (36.1 ns/cmd mean)  allocations_during_run=0
+untimed run 2: 23.52 M cmd/s  (42.5 ns/cmd mean)  allocations_during_run=0
+untimed run 3: 22.89 M cmd/s  (43.7 ns/cmd mean)  allocations_during_run=0
+untimed run 4: 24.87 M cmd/s  (40.2 ns/cmd mean)  allocations_during_run=0
+untimed run 5: 27.85 M cmd/s  (35.9 ns/cmd mean)  allocations_during_run=0
+throughput without timers: min 22.89 / median 24.87 / max 27.85 M cmd/s  (max/min = 1.22, n=5)
+load after:  load averages: 51.83 26.32 19.78
+
+## Engine workload: replace 30% move-only  (seed=42 commands=1000000 cancel=30% replace=30% MoveOnly market=10%)
+load before: load averages: 51.83 26.32 19.78
+run 1 (all kinds)            n=  1000000  p50=    42  p95=   125  p99=   208  p99.9=    334  max=   203647  (ns)
+                             throughput=8.37 M cmd/s (incl. timer overhead)  trades=340921  allocations_during_run=0
+run 2 (all kinds)            n=  1000000  p50=    42  p95=   166  p99=   209  p99.9=    375  max=  1096703  (ns)
+                             throughput=7.53 M cmd/s (incl. timer overhead)  trades=340921  allocations_during_run=0
+run 3 (all kinds)            n=  1000000  p50=    42  p95=   167  p99=   250  p99.9=    417  max= 21938175  (ns)
+                             throughput=3.78 M cmd/s (incl. timer overhead)  trades=340921  allocations_during_run=0
+run 4 (all kinds)            n=  1000000  p50=    42  p95=   167  p99=   209  p99.9=    417  max= 16990207  (ns)
+                             throughput=5.56 M cmd/s (incl. timer overhead)  trades=340921  allocations_during_run=0
+run 5 (all kinds)            n=  1000000  p50=    42  p95=   167  p99=   250  p99.9=    750  max=  7462911  (ns)
+                             throughput=4.46 M cmd/s (incl. timer overhead)  trades=340921  allocations_during_run=0
+all runs (all kinds)         n=  5000000  p50=    42  p95=   166  p99=   209  p99.9=    417  max= 21938175  (ns)
+by outcome, all 5 runs combined (count is per run):
+  limit            n/run= 299696  p50=   84  p95=  208  p99=  250  p99.9=   667  max= 16990207  | per-run p50 83..125  p99 250..250 (ns)
+  market           n/run= 102994  p50=   84  p95=  208  p99=  250  p99.9=   708  max= 21938175  | per-run p50 83..84  p99 250..292 (ns)
+  cancel           n/run=  33354  p50=   42  p95=  125  p99=  209  p99.9=   417  max=   521727  | per-run p50 42..42  p99 208..250 (ns)
+  replace_keep     n/run=    162  p50=   83  p95=  167  p99=  250  p99.9= 35711  max=    35711  | per-run p50 83..83  p99 209..333 (ns)
+  replace_requeue  n/run=  32724  p50=   84  p95=  167  p99=  291  p99.9=   708  max=  3919871  | per-run p50 84..84  p99 250..292 (ns)
+  rejected         n/run= 531070  p50=   41  p95=   42  p99=  125  p99.9=   208  max=  7462911  | per-run p50 41..41  p99 84..125 (ns)
+throughput with per-op timers: min 3.78 / median 5.56 / max 8.37 M cmd/s  (max/min = 2.21, n=5)
+untimed run 1: 25.76 M cmd/s  (38.8 ns/cmd mean)  allocations_during_run=0
+untimed run 2: 25.51 M cmd/s  (39.2 ns/cmd mean)  allocations_during_run=0
+untimed run 3: 24.28 M cmd/s  (41.2 ns/cmd mean)  allocations_during_run=0
+untimed run 4: 23.23 M cmd/s  (43.1 ns/cmd mean)  allocations_during_run=0
+untimed run 5: 23.91 M cmd/s  (41.8 ns/cmd mean)  allocations_during_run=0
+throughput without timers: min 23.23 / median 24.28 / max 25.76 M cmd/s  (max/min = 1.11, n=5)
+load after:  load averages: 51.83 26.32 19.78
+
+load before queue/pipeline: load averages: 51.83 26.32 19.78
+
+## SPSC queue: cross-thread round-trip (ping-pong over two queues, cap 1024; RTT includes both hops)
+run 1 RTT                    n=  1000000  p50=   292  p95=   500  p99=   542  p99.9=  14087  max=  1601535  (ns)
+run 2 RTT                    n=  1000000  p50=   333  p95=   500  p99=   542  p99.9=  13255  max=  1762303  (ns)
+run 3 RTT                    n=  1000000  p50=   166  p95=   500  p99=   542  p99.9=  19343  max= 23953407  (ns)
+run 4 RTT                    n=  1000000  p50=   166  p95=   500  p99=   542  p99.9=  35807  max= 12623871  (ns)
+run 5 RTT                    n=  1000000  p50=   125  p95=   500  p99=   542  p99.9=  13335  max=  3987455  (ns)
+all runs RTT                 n=  5000000  p50=   167  p95=   500  p99=   542  p99.9=  16719  max= 23953407  (ns)
+
+## Pipeline: producer thread -> SPSC (cap 4096) -> engine thread (5 runs + 1 warm-up)
+run 1: 12.97 M cmd/s end-to-end  producer_full_spins=441043  final_hash=f1f1874b01cb0bc8
+run 2: 12.44 M cmd/s end-to-end  producer_full_spins=466907  final_hash=f1f1874b01cb0bc8
+run 3: 11.28 M cmd/s end-to-end  producer_full_spins=1404334  final_hash=f1f1874b01cb0bc8
+run 4: 12.55 M cmd/s end-to-end  producer_full_spins=402647  final_hash=f1f1874b01cb0bc8
+run 5: 12.81 M cmd/s end-to-end  producer_full_spins=338392  final_hash=f1f1874b01cb0bc8
+load at end: load averages: 49.84 26.33 19.82
+=== uptime after: 10:58  load averages: 49.84 26.33 19.82

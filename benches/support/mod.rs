@@ -55,6 +55,18 @@ pub fn ram_gib() -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
+/// Current load averages (1/5/15 min) from `uptime`, best effort. Recorded because
+/// these benchmarks are run on a shared machine.
+pub fn load() -> String {
+    match cmd("uptime", &[]) {
+        Some(u) => match u.find("load average") {
+            Some(i) => u[i..].to_string(),
+            None => u,
+        },
+        None => "unknown".into(),
+    }
+}
+
 /// Prints a machine/build metadata block.
 pub fn print_metadata() {
     let cores = std::thread::available_parallelism()

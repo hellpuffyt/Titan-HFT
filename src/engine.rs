@@ -70,10 +70,11 @@ impl MatchingEngine {
                     reason: RejectReason::UnknownOrder,
                 }),
             },
+            Command::Replace { id, price, qty } => self.replace(id, price, qty, sink),
         }
     }
 
-    fn validate_limit(&self, id: OrderId, price: Price, qty: Qty) -> Result<(), RejectReason> {
+    fn validate_price_qty(&self, price: Price, qty: Qty) -> Result<(), RejectReason> {
         let cfg = self.book.config();
         if qty == 0 {
             return Err(RejectReason::ZeroQty);
@@ -87,6 +88,63 @@ impl MatchingEngine {
         if price < cfg.min_price || price > cfg.max_price {
             return Err(RejectReason::PriceOutOfBand);
         }
+        Ok(())
+    }
+
+    /// Replace semantics are documented on [`Command::Replace`]. Validation order:
+    /// `zero_qty`, `qty_too_large`, `bad_tick`, `price_out_of_band`, `unknown_order`.
+    /// A rejected replace leaves the original order untouched.
+    fn replace<S: EventSink>(&mut self, id: OrderId, price: Price, qty: Qty, sink: &mut S) {
+        let current = match self.validate_price_qty(price, qty) {
+            Err(reason) => Err(reason),
+            Ok(()) => self.book.order(id).ok_or(RejectReason::UnknownOrder),
+        };
+        let current = match current {
+            Ok(c) => c,
+            Err(reason) => {
+                sink.emit(Event::Rejected { id, reason });
+                return;
+            }
+        };
+        if price == current.price && qty <= current.qty && self.book.reduce(id, qty) {
+            sink.emit(Event::Replaced {
+                id,
+                price,
+                qty,
+                prev_qty: current.qty,
+                kept_priority: true,
+            });
+            return;
+        }
+        // Lose priority: unlink (frees a node, so re-inserting cannot hit BookFull),
+        // then behave like a new limit order with the same id and side.
+        self.book.remove(id);
+        sink.emit(Event::Replaced {
+            id,
+            price,
+            qty,
+            prev_qty: current.qty,
+            kept_priority: false,
+        });
+        let level = self.book.level_of(price);
+        let remaining = self.sweep(id, current.side, Some(level), qty, sink);
+        if remaining > 0
+            && self
+                .book
+                .insert(id, current.side, level, remaining)
+                .is_err()
+        {
+            // Unreachable: a node was freed just above. Kept for event consistency.
+            sink.emit(Event::Cancelled {
+                id,
+                qty: remaining,
+                reason: CancelReason::Ioc,
+            });
+        }
+    }
+
+    fn validate_limit(&self, id: OrderId, price: Price, qty: Qty) -> Result<(), RejectReason> {
+        self.validate_price_qty(price, qty)?;
         if self.book.contains(id) {
             return Err(RejectReason::DuplicateId);
         }
@@ -468,5 +526,243 @@ mod tests {
             .len(),
             2
         );
+    }
+
+    fn rpl(id: u64, price: u64, qty: u64) -> Command {
+        Command::Replace { id, price, qty }
+    }
+
+    fn resting_ids(e: &MatchingEngine) -> Vec<u64> {
+        let mut v = Vec::new();
+        e.book().for_each_order(|o| v.push(o.id));
+        v
+    }
+
+    #[test]
+    fn replace_reduce_same_price_keeps_priority() {
+        let mut e = engine();
+        run(&mut e, lim(1, Sell, 100, 10));
+        run(&mut e, lim(2, Sell, 100, 10));
+        assert_eq!(
+            run(&mut e, rpl(1, 100, 4)),
+            vec![Event::Replaced {
+                id: 1,
+                price: 100,
+                qty: 4,
+                prev_qty: 10,
+                kept_priority: true
+            }]
+        );
+        assert_eq!(resting_ids(&e), vec![1, 2], "order 1 is still first");
+        assert_eq!(e.book().best_ask(), Some((100, 14)));
+        // The front order still trades first.
+        let ev = run(&mut e, lim(9, Buy, 100, 5));
+        assert_eq!(
+            ev[1],
+            Event::Trade {
+                taker: 9,
+                maker: 1,
+                price: 100,
+                qty: 4
+            }
+        );
+        assert_eq!(
+            ev[2],
+            Event::Trade {
+                taker: 9,
+                maker: 2,
+                price: 100,
+                qty: 1
+            }
+        );
+    }
+
+    #[test]
+    fn replace_same_price_same_qty_is_a_priority_keeping_no_op() {
+        let mut e = engine();
+        run(&mut e, lim(1, Buy, 50, 3));
+        run(&mut e, lim(2, Buy, 50, 3));
+        let h = e.book().state_hash();
+        assert_eq!(
+            run(&mut e, rpl(1, 50, 3)),
+            vec![Event::Replaced {
+                id: 1,
+                price: 50,
+                qty: 3,
+                prev_qty: 3,
+                kept_priority: true
+            }]
+        );
+        assert_eq!(e.book().state_hash(), h);
+    }
+
+    #[test]
+    fn replace_qty_increase_loses_priority() {
+        let mut e = engine();
+        run(&mut e, lim(1, Buy, 50, 3));
+        run(&mut e, lim(2, Buy, 50, 3));
+        assert_eq!(
+            run(&mut e, rpl(1, 50, 5)),
+            vec![Event::Replaced {
+                id: 1,
+                price: 50,
+                qty: 5,
+                prev_qty: 3,
+                kept_priority: false
+            }]
+        );
+        assert_eq!(resting_ids(&e), vec![2, 1], "order 1 moved to the back");
+        assert_eq!(e.book().best_bid(), Some((50, 8)));
+    }
+
+    #[test]
+    fn replace_price_change_loses_priority_even_when_reducing() {
+        let mut e = engine();
+        run(&mut e, lim(1, Buy, 50, 5));
+        run(&mut e, lim(2, Buy, 51, 5));
+        // Move order 1 up to 51 with a smaller quantity: it goes behind order 2.
+        assert_eq!(
+            run(&mut e, rpl(1, 51, 2)),
+            vec![Event::Replaced {
+                id: 1,
+                price: 51,
+                qty: 2,
+                prev_qty: 5,
+                kept_priority: false
+            }]
+        );
+        assert_eq!(resting_ids(&e), vec![2, 1]);
+        assert_eq!(e.book().order(1).map(|o| (o.price, o.qty)), Some((51, 2)));
+        assert_eq!(e.book().depth(Side::Buy), vec![(51, 7, 2)]);
+    }
+
+    #[test]
+    fn replace_into_a_cross_matches_immediately_as_taker() {
+        let mut e = engine();
+        run(&mut e, lim(1, Sell, 105, 3));
+        run(&mut e, lim(2, Sell, 106, 3));
+        run(&mut e, lim(3, Buy, 100, 10));
+        let ev = run(&mut e, rpl(3, 105, 10));
+        assert_eq!(
+            ev,
+            vec![
+                Event::Replaced {
+                    id: 3,
+                    price: 105,
+                    qty: 10,
+                    prev_qty: 10,
+                    kept_priority: false
+                },
+                Event::Trade {
+                    taker: 3,
+                    maker: 1,
+                    price: 105,
+                    qty: 3
+                },
+            ]
+        );
+        // Remainder rests at the new price; the 106 ask is not reachable at 105.
+        assert_eq!(e.book().best_bid(), Some((105, 7)));
+        assert_eq!(e.book().best_ask(), Some((106, 3)));
+    }
+
+    #[test]
+    fn replace_that_fully_fills_leaves_nothing_resting() {
+        let mut e = engine();
+        run(&mut e, lim(1, Sell, 100, 5));
+        run(&mut e, lim(2, Buy, 90, 2));
+        let ev = run(&mut e, rpl(2, 100, 2));
+        assert_eq!(ev.len(), 2);
+        assert_eq!(
+            ev[1],
+            Event::Trade {
+                taker: 2,
+                maker: 1,
+                price: 100,
+                qty: 2
+            }
+        );
+        assert!(!e.book().contains(2));
+        assert_eq!(e.book().best_ask(), Some((100, 3)));
+        // Filled id is no longer replaceable.
+        assert_eq!(
+            run(&mut e, rpl(2, 95, 1)),
+            vec![Event::Rejected {
+                id: 2,
+                reason: RejectReason::UnknownOrder
+            }]
+        );
+    }
+
+    #[test]
+    fn replace_rejections_leave_the_order_untouched() {
+        let mut e = MatchingEngine::new(BookConfig {
+            tick: 5,
+            min_price: 5,
+            max_price: 500,
+            max_orders: 4,
+        })
+        .unwrap();
+        run(&mut e, lim(1, Buy, 100, 4));
+        run(&mut e, lim(2, Buy, 100, 4));
+        let h = e.book().state_hash();
+        for (cmd, reason) in [
+            (rpl(1, 100, 0), RejectReason::ZeroQty),
+            (rpl(1, 100, MAX_ORDER_QTY + 1), RejectReason::QtyTooLarge),
+            (rpl(1, 102, 4), RejectReason::BadTick),
+            (rpl(1, 505, 4), RejectReason::PriceOutOfBand),
+            (rpl(1, 0, 4), RejectReason::PriceOutOfBand),
+            (rpl(77, 100, 1), RejectReason::UnknownOrder),
+        ] {
+            assert_eq!(
+                run(&mut e, cmd),
+                vec![Event::Rejected {
+                    id: cmd.id(),
+                    reason
+                }],
+                "{cmd}"
+            );
+            assert_eq!(e.book().state_hash(), h, "{cmd} changed the book");
+        }
+        assert_eq!(resting_ids(&e), vec![1, 2]);
+    }
+
+    #[test]
+    fn replace_of_cancelled_order_is_unknown() {
+        let mut e = engine();
+        run(&mut e, lim(1, Sell, 100, 5));
+        run(&mut e, Command::Cancel { id: 1 });
+        assert_eq!(
+            run(&mut e, rpl(1, 100, 5)),
+            vec![Event::Rejected {
+                id: 1,
+                reason: RejectReason::UnknownOrder
+            }]
+        );
+    }
+
+    #[test]
+    fn replace_requeue_works_when_the_pool_is_full() {
+        let mut e = MatchingEngine::new(BookConfig {
+            tick: 1,
+            min_price: 1,
+            max_price: 10,
+            max_orders: 2,
+        })
+        .unwrap();
+        run(&mut e, lim(1, Buy, 1, 1));
+        run(&mut e, lim(2, Buy, 2, 1));
+        assert!(!e.book().has_capacity());
+        assert_eq!(
+            run(&mut e, rpl(1, 3, 9)),
+            vec![Event::Replaced {
+                id: 1,
+                price: 3,
+                qty: 9,
+                prev_qty: 1,
+                kept_priority: false
+            }]
+        );
+        assert_eq!(e.book().best_bid(), Some((3, 9)));
     }
 }

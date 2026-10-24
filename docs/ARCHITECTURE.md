@@ -52,6 +52,15 @@ index: HashMap<OrderId, u32>  id → node, capacity 2 × max_orders
 - **Slab + free list.** Nodes are recycled. When the pool is exhausted, the engine returns `book_full`; it never grows.
 - **Id index.** `HashMap` with a custom splitmix64 hasher, created with capacity 2 × `max_orders`. hashbrown rehashes *in place* (no allocation) when tombstones accumulate and the load is under half of capacity. Sizing it at 2× ensures that rehashes never need to reallocate. The allocation test checks this.
 
+## Replace
+
+`Command::Replace { id, price, qty }` takes one of two paths:
+
+- **Reduce in place** (same price, `qty <=` remaining): `OrderBook::reduce` updates the node's quantity and the level total. The node stays where it is in the FIFO, so it keeps priority. O(1).
+- **Requeue** (anything else): `OrderBook::remove` (the same O(1) unlink a cancel does, returning the node to the free list), then the order runs through the same `sweep` as an incoming limit order, and any remainder is inserted at the tail of its new level. Because the unlink frees a node first, the re-insert cannot fail with `book_full`.
+
+The id index keeps the same key (remove + insert into a map whose capacity is 2 × `max_orders`), so neither path allocates. `tests/alloc.rs` measures this with 100k+ replaces.
+
 ## Determinism
 
 `MatchingEngine::process` reads no clock, no random numbers, and no environment, and it iterates only over ordered structures (the ladder and the FIFO lists, never the hash map). The same `BookConfig` plus the same command sequence therefore always yields the same events and the same `state_hash()`. The journal records commands, events, and the final hash, and `Journal::verify` re-executes and compares. The property test `same_input_same_output` and the golden fixtures check this property.
@@ -74,4 +83,4 @@ See [MEMORY_ORDERING.md](MEMORY_ORDERING.md). In short:
 
 ## What a production engine would add
 
-These are out of scope here and listed so readers know what is missing: persistence and recovery (write-ahead journal plus snapshots), sequencing across multiple gateways, risk checks, self-trade prevention, order modify, multiple instruments, market-data publishing, kernel-bypass networking, CPU pinning and isolation, and huge pages.
+These are out of scope here and listed so readers know what is missing: persistence and recovery (write-ahead journal plus snapshots), sequencing across multiple gateways, risk checks, self-trade prevention, multiple instruments, market-data publishing, kernel-bypass networking, CPU pinning and isolation, and huge pages.
