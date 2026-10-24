@@ -22,7 +22,7 @@ Details: [ARCHITECTURE.md](ARCHITECTURE.md) and [MEMORY_ORDERING.md](MEMORY_ORDE
 
 ## Supported platforms and prerequisites
 
-- Rust ≥ 1.86 (edition 2024; the library alone needs 1.85, the Criterion dev-dependency needs 1.86). No system libraries.
+- Rust ≥ 1.86 (edition 2024; `rust-version = "1.86"` in Cargo.toml, set by the Criterion dev-dependency, so Cargo refuses older toolchains for the library too). No system libraries.
 - Verified locally on macOS 27.0.1 / Apple M5 (aarch64).
 - Linux x86-64 and Windows x86-64 are covered **only by CI**. Per the maintainer, CI was green on `1cfd689` and on `7ef3907` (PR #3). CI has not yet run on `30fb5f4`.
 - Loom needs `RUSTFLAGS="--cfg loom"`. Miri needs a nightly toolchain with `miri` and `rust-src`.

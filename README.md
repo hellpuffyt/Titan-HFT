@@ -75,7 +75,7 @@ DIVERGENCE: divergence at command #3 (line 9): L B 10 101 12
     < TRADE 10 1 101 2
 ```
 
-Requires Rust 1.86+ (edition 2024; the library alone needs 1.85, the Criterion dev-dependency needs 1.86). No other system dependencies.
+Requires Rust 1.86+ (edition 2024; `rust-version = "1.86"` in Cargo.toml, set by the Criterion dev-dependency, so Cargo refuses older toolchains for the library too). No other system dependencies.
 
 ## Features
 
