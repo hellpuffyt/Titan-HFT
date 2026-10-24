@@ -47,7 +47,7 @@ It is for students, systems programmers learning atomics, and anyone who wants a
 
 ```sh
 git clone https://github.com/hellpuffyt/Titan-HFT && cd Titan-HFT
-cargo test --release                                   # 53 tests incl. property & stress tests
+cargo test --release                                   # 73 tests incl. property, fuzz & stress tests
 cargo run --release --bin titan -- gen --seed 42 --count 5000 --out flow.cmds
 cargo run --release --bin titan -- run flow.cmds --quiet --journal flow.journal
 cargo run --release --bin titan -- replay flow.journal
@@ -160,6 +160,7 @@ What the suites cover:
 - **Stress** (`tests/stress.rs`): producer → queue → engine at capacities 1, 2, 64, and 4096 must equal the single-threaded result exactly. Also 2M items through an 8-slot queue, and a leak/double-free check with `Arc` payloads.
 - **Allocation** (`tests/alloc.rs`): a counting global allocator shows 0 allocations while matching 500,000 commands (621,360 trades) after warm-up, and 0 from a cold start. With 20% replaces in the flow, it shows 0 allocations over 500,000 commands containing 100,295 replaces.
 - **Loom**: verified to fail with a causality violation when the producer's `tail` store is weakened to `Relaxed`, and to pass with `Release`.
+- **Robustness** (`tests/robustness.rs`): the journal and command parsers are fuzzed (arbitrary Unicode text, grammar-token soup, single-byte mutations of a valid journal, truncation at every byte, CRLF, `u64` edge values) and must return a typed, line-numbered error or a journal that replays without panicking. 16 adversarial 50,000-command workloads (tiny id space, prices off-band and off-tick, quantities 0 / 2^32 / 2^32+1, a 16-order pool) check after every command that the book is not crossed, the id index and the ladders agree, level totals and counts match their orders, quantity is conserved, and rejected commands change nothing. Every reject reason, partial fills, both replace outcomes and IOC remainders are confirmed to occur. Book and event-stream hashes of three 100,000-command workloads are pinned, so a platform-dependent result fails CI on Linux, macOS, or Windows.
 - **Fixtures**: golden journals replay byte-for-byte (including `replace.cmds`, one scenario per replace rule); a tampered journal is detected at the right line; malformed inputs report line numbers (CLI exit code 2).
 
 ## Benchmarks
