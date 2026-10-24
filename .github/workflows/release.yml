@@ -1,7 +1,8 @@
 name: Release
 on:
+  # DRY RUN of the artifact-action upgrades: runs on pushes to this test branch only, never on tags.
   push:
-    tags: ["v*"]
+    branches: [ci/dependabot-artifact-dryrun]
 permissions:
   contents: read
 jobs:
@@ -34,11 +35,15 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { merge-multiple: true }
-      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
-        with:
-          files: "*.tar.gz"
-          generate_release_notes: true
+      - name: Verify artifacts (dry run; no release is created)
+        run: |
+          ls -la
+          n=$(ls *.tar.gz | wc -l)
+          echo "tarballs: $n"
+          test "$n" -ge 1
+          sha256sum *.tar.gz
+          for f in *.tar.gz; do tar -tzf "$f" > /dev/null; done
