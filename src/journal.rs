@@ -272,16 +272,27 @@ fn parse_config(text: &str, line: usize) -> Result<BookConfig, JournalError> {
             .split_once('=')
             .ok_or_else(|| err(line, format!("config item '{kv}' is not key=value")))?;
         let n = num(Some(v), line, k)?;
+        let bit = match k {
+            "tick" => 1,
+            "min" => 2,
+            "max" => 4,
+            "max_orders" => 8,
+            _ => return Err(err(line, format!("unknown config key '{k}'"))),
+        };
+        // A repeated key would otherwise silently override the earlier value, so one
+        // journal could carry two different book configurations.
+        if seen & bit != 0 {
+            return Err(err(line, format!("duplicate config key '{k}'")));
+        }
+        seen |= bit;
         match k {
-            "tick" => (cfg.tick, seen) = (n, seen | 1),
-            "min" => (cfg.min_price, seen) = (n, seen | 2),
-            "max" => (cfg.max_price, seen) = (n, seen | 4),
-            "max_orders" => {
+            "tick" => cfg.tick = n,
+            "min" => cfg.min_price = n,
+            "max" => cfg.max_price = n,
+            _ => {
                 cfg.max_orders = u32::try_from(n)
                     .map_err(|_| err(line, format!("max_orders {n} does not fit in u32")))?;
-                seen |= 8;
             }
-            _ => return Err(err(line, format!("unknown config key '{k}'"))),
         }
     }
     if seen != 15 {
