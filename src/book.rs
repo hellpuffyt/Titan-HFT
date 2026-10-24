@@ -435,6 +435,24 @@ impl OrderBook {
         }
     }
 
+    /// Reduces a resting order's remaining quantity in place, keeping its queue
+    /// position. Requires `0 < new_qty <= current`; returns `false` (and changes
+    /// nothing) otherwise or if `id` is not resting. O(1).
+    pub(crate) fn reduce(&mut self, id: OrderId, new_qty: Qty) -> bool {
+        let Some(&n) = self.index.get(&id) else {
+            return false;
+        };
+        let node = &mut self.nodes[n as usize];
+        let old = node.qty;
+        if new_qty == 0 || new_qty > old {
+            return false;
+        }
+        node.qty = new_qty;
+        let (side, level) = (node.side, node.level);
+        self.ladder_mut(side).levels[level as usize].qty -= old - new_qty;
+        true
+    }
+
     /// Removes a resting order by id, returning its remaining quantity.
     pub(crate) fn remove(&mut self, id: OrderId) -> Option<Qty> {
         let &n = self.index.get(&id)?;

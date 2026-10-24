@@ -1,0 +1,29 @@
+# Order replacement walkthrough: one scenario per documented rule.
+# Two asks at 100 (1 is ahead of 2) and one at 103.
+L S 1 100 10
+L S 2 100 10
+L S 3 103 5
+# Rule 1: same price, smaller quantity -> reduced in place, keeps time priority.
+R 1 100 4
+# Rule 2: same price, larger quantity -> loses priority (now behind 2).
+R 1 100 6
+# Proof: a buy for 12 @ 100 now fills 2 (10) before 1 (2).
+L B 10 100 12
+# Rule 3: a price change loses priority and may cross: move bid 11 up to 103.
+L B 11 99 8
+R 11 103 8
+# Rule 4: unknown, filled and cancelled ids are rejected.
+R 99 100 1
+R 10 100 1
+C 3
+R 3 103 1
+# Rule 5: invalid quantity / price are rejected with the usual reasons and leave
+# the order untouched (bid 20 keeps 7 @ 95). bad_tick is covered by unit tests,
+# since this fixture uses tick 1.
+L B 20 95 7
+R 20 95 0
+R 20 95 4294967297
+R 20 0 7
+R 20 100001 7
+# Rule 6: same price, same quantity -> no-op that keeps priority.
+R 20 95 7

@@ -44,6 +44,7 @@ impl Side {
 }
 
 /// An instruction to the matching engine.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
     /// Limit order: match what crosses, rest the remainder at `price`.
@@ -72,18 +73,38 @@ pub enum Command {
         /// Id of the resting order.
         id: OrderId,
     },
+    /// Replace (modify) a resting order's price and/or remaining quantity. The side
+    /// is inherited from the resting order.
+    ///
+    /// * Same price and `qty <=` current remaining quantity: reduced in place, keeps
+    ///   its time priority.
+    /// * Any price change, or a quantity increase: loses priority — it is removed and
+    ///   re-entered at the back of its (new) level, and if the new price crosses the
+    ///   opposite side it matches immediately as the taker.
+    Replace {
+        /// Id of the resting order.
+        id: OrderId,
+        /// New limit price.
+        price: Price,
+        /// New *remaining* quantity (not the original order quantity).
+        qty: Qty,
+    },
 }
 
 impl Command {
     /// The order id this command refers to.
     pub fn id(&self) -> OrderId {
         match *self {
-            Command::Limit { id, .. } | Command::Market { id, .. } | Command::Cancel { id } => id,
+            Command::Limit { id, .. }
+            | Command::Market { id, .. }
+            | Command::Cancel { id }
+            | Command::Replace { id, .. } => id,
         }
     }
 }
 
 /// Why a command was rejected. Rejections never change book state.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum RejectReason {
     /// Quantity was zero.
@@ -132,6 +153,7 @@ impl RejectReason {
 }
 
 /// Why an order left the book without filling.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum CancelReason {
     /// Explicit cancel command.
@@ -152,6 +174,50 @@ impl CancelReason {
 
 /// An output of the matching engine. The event stream is a pure function of the
 /// command stream and the [`crate::engine::EngineConfig`].
+///
+/// This enum is `#[non_exhaustive]`: future versions may add events, so downstream
+/// matches need a wildcard arm. Intended usage:
+///
+/// ```
+/// use titan_hft::book::BookConfig;
+/// use titan_hft::engine::MatchingEngine;
+/// use titan_hft::types::{Command, Event, Side};
+///
+/// let mut engine = MatchingEngine::new(BookConfig {
+///     tick: 1, min_price: 1, max_price: 1_000, max_orders: 64,
+/// })?;
+/// let mut events = Vec::new();
+/// engine.process(Command::Limit { id: 1, side: Side::Buy, price: 100, qty: 10 }, &mut events);
+/// engine.process(Command::Replace { id: 1, price: 100, qty: 4 }, &mut events);
+///
+/// let mut kept = 0;
+/// for e in &events {
+///     match *e {
+///         Event::Trade { qty, .. } => println!("traded {qty}"),
+///         Event::Replaced { kept_priority: true, .. } => kept += 1,
+///         Event::Replaced { kept_priority: false, .. } => {}
+///         _ => {} // ACK, REJ, CXL, and any events added in future versions
+///     }
+/// }
+/// assert_eq!(kept, 1);
+/// # Ok::<(), titan_hft::book::ConfigError>(())
+/// ```
+///
+/// A downstream match without a wildcard does not compile:
+///
+/// ```compile_fail,E0004
+/// use titan_hft::types::Event;
+/// fn name(e: Event) -> &'static str {
+///     match e {
+///         Event::Accepted { .. } => "ACK",
+///         Event::Rejected { .. } => "REJ",
+///         Event::Trade { .. } => "TRADE",
+///         Event::Replaced { .. } => "RPL",
+///         Event::Cancelled { .. } => "CXL",
+///     }
+/// }
+/// ```
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     /// The order passed validation.
@@ -177,6 +243,20 @@ pub enum Event {
         /// Executed quantity.
         qty: Qty,
     },
+    /// A resting order was replaced. If the new price crosses, `Trade` events with
+    /// this order as taker follow.
+    Replaced {
+        /// Order id.
+        id: OrderId,
+        /// New price.
+        price: Price,
+        /// New remaining quantity (before any matching it triggers).
+        qty: Qty,
+        /// Remaining quantity before the replace.
+        prev_qty: Qty,
+        /// `true` if the order kept its place in the queue (in-place reduction).
+        kept_priority: bool,
+    },
     /// Quantity removed without trading.
     Cancelled {
         /// Order id.
@@ -199,6 +279,17 @@ impl fmt::Display for Event {
                 price,
                 qty,
             } => write!(f, "TRADE {taker} {maker} {price} {qty}"),
+            Event::Replaced {
+                id,
+                price,
+                qty,
+                prev_qty,
+                kept_priority,
+            } => write!(
+                f,
+                "RPL {id} {price} {qty} {prev_qty} {}",
+                if kept_priority { "keep" } else { "requeue" }
+            ),
             Event::Cancelled { id, qty, reason } => {
                 write!(f, "CXL {id} {qty} {}", reason.as_str())
             }
@@ -217,6 +308,7 @@ impl fmt::Display for Command {
             } => write!(f, "L {} {id} {price} {qty}", side.code()),
             Command::Market { id, side, qty } => write!(f, "M {} {id} {qty}", side.code()),
             Command::Cancel { id } => write!(f, "C {id}"),
+            Command::Replace { id, price, qty } => write!(f, "R {id} {price} {qty}"),
         }
     }
 }
@@ -253,6 +345,59 @@ impl EventSink for CountingSink {
         if let Event::Trade { qty, .. } = event {
             self.trades += 1;
             self.traded_qty += qty;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Inside this crate `#[non_exhaustive]` has no effect, so these matches are
+    /// checked for exhaustiveness. Adding a variant stops compilation here, as a
+    /// reminder to extend the reference model in `tests/properties.rs`, the journal
+    /// parser, and the CHANGELOG (a new variant is a minor-version change).
+    #[test]
+    fn variant_canary() {
+        let kind = |c: Command| match c {
+            Command::Limit { .. } => "L",
+            Command::Market { .. } => "M",
+            Command::Cancel { .. } => "C",
+            Command::Replace { .. } => "R",
+        };
+        assert_eq!(kind(Command::Cancel { id: 1 }), "C");
+        let ev = |e: Event| match e {
+            Event::Accepted { .. } => "ACK",
+            Event::Rejected { .. } => "REJ",
+            Event::Trade { .. } => "TRADE",
+            Event::Replaced { .. } => "RPL",
+            Event::Cancelled { .. } => "CXL",
+        };
+        assert_eq!(ev(Event::Accepted { id: 1 }), "ACK");
+        let all_reasons = [
+            RejectReason::ZeroQty,
+            RejectReason::QtyTooLarge,
+            RejectReason::BadTick,
+            RejectReason::PriceOutOfBand,
+            RejectReason::DuplicateId,
+            RejectReason::UnknownOrder,
+            RejectReason::BookFull,
+        ];
+        for r in all_reasons {
+            // Exhaustive by construction of `as_str`/`parse`: every token round-trips.
+            assert_eq!(RejectReason::parse(r.as_str()), Some(r));
+            match r {
+                RejectReason::ZeroQty
+                | RejectReason::QtyTooLarge
+                | RejectReason::BadTick
+                | RejectReason::PriceOutOfBand
+                | RejectReason::DuplicateId
+                | RejectReason::UnknownOrder
+                | RejectReason::BookFull => {}
+            }
+        }
+        match CancelReason::User {
+            CancelReason::User | CancelReason::Ioc => {}
         }
     }
 }

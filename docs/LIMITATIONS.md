@@ -5,7 +5,8 @@ Titan-HFT is educational and research software. These are known, deliberate, or 
 ## Scope
 - **Not a trading system.** There is no networking, exchange protocol, authentication, risk management, persistence, or recovery.
 - **Single instrument per engine.** Multiple books would need one engine per symbol, or a symbol field in `Command`.
-- **No order modify/amend.** Cancel and re-enter instead (this loses time priority, as most venues would for a price change).
+- **Replace semantics follow one common convention; venues differ.** Here, the order keeps its id, keeps priority only for a same-price quantity reduction, and loses it on any price change or increase. Real venues vary in the details: for example, FIX cancel/replace requests carry a new client order id that references the original. Replace `qty` is the new *remaining* quantity, and there is no "only if remaining is still X" guard, so a replace that races a partial fill can increase exposure (see good-first-issues #2).
+- **Side cannot be changed by a replace.** Cancel and re-enter instead.
 - **No self-trade prevention.** There is no account/owner concept.
 - **Order ids are unique only among resting orders.** A filled or cancelled id may be reused. Real venues usually require ids to be unique for the whole session.
 

@@ -41,6 +41,20 @@ fn pipeline_equals_direct_under_saturation() {
 }
 
 #[test]
+fn pipeline_equals_direct_with_replaces() {
+    let w = WorkloadConfig {
+        seed: 21,
+        commands: 200_000,
+        replace_pct: 25,
+        ..Default::default()
+    };
+    let (want_sink, want_hash) = direct(&w, 1 << 16);
+    let r = pipeline::run(w.book_config(1 << 16), w.generate(), 2).unwrap();
+    assert_eq!(r.sink, want_sink);
+    assert_eq!(r.final_hash, want_hash);
+}
+
+#[test]
 fn queue_transfers_every_item_once_in_order_under_contention() {
     const N: u64 = 2_000_000;
     let (mut tx, mut rx) = spsc::channel::<u64>(8).unwrap();

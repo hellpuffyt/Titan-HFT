@@ -1,0 +1,19 @@
+uptime before: 10:58  load averages: 39.78 26.04 19.93
+engine/workload_100k_default_mix
+                        time:   [3.1177 ms 3.4827 ms 3.7910 ms]
+                        thrpt:  [26.378 Melem/s 28.713 Melem/s 32.075 Melem/s]
+Found 3 outliers among 30 measurements (10.00%)
+engine/workload_100k_replace10_mixed
+                        time:   [3.1313 ms 3.2625 ms 3.3821 ms]
+                        thrpt:  [29.567 Melem/s 30.652 Melem/s 31.936 Melem/s]
+engine/workload_100k_replace30_mixed
+                        time:   [3.5526 ms 3.6735 ms 3.7765 ms]
+                        thrpt:  [26.480 Melem/s 27.222 Melem/s 28.148 Melem/s]
+engine/workload_100k_replace30_reduce_only
+                        time:   [3.0615 ms 3.1706 ms 3.2768 ms]
+                        thrpt:  [30.517 Melem/s 31.540 Melem/s 32.664 Melem/s]
+engine/workload_100k_replace30_move_only
+                        time:   [2.8774 ms 2.9786 ms 3.0812 ms]
+                        thrpt:  [32.455 Melem/s 33.573 Melem/s 34.753 Melem/s]
+Found 1 outliers among 30 measurements (3.33%)
+uptime after: 10:59  load averages: 23.19 23.64 19.39

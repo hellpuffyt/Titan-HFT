@@ -95,6 +95,93 @@ fn steady_state_matching_does_not_allocate() {
 }
 
 #[test]
+fn steady_state_matching_with_replaces_does_not_allocate() {
+    // 20% replaces (half in-place reductions, half requeues that may cross).
+    let w = WorkloadConfig {
+        commands: 1_000_000,
+        seed: 11,
+        replace_pct: 20,
+        ..Default::default()
+    };
+    let flow = w.generate();
+    let mut engine = MatchingEngine::new(w.book_config(1 << 17)).unwrap();
+    let mut sink = CountingSink::default();
+    let (warm, hot) = flow.split_at(flow.len() / 2);
+    for &c in warm {
+        engine.process(c, &mut sink);
+    }
+    let replaces = hot
+        .iter()
+        .filter(|c| matches!(c, titan_hft::types::Command::Replace { .. }))
+        .count();
+    let (_, allocs) = count(|| {
+        for &c in hot {
+            engine.process(c, &mut sink);
+        }
+    });
+    println!(
+        "measured {} commands ({replaces} replaces), {} trades, allocations = {allocs}",
+        hot.len(),
+        sink.trades
+    );
+    assert!(replaces > 50_000);
+    assert_eq!(allocs, 0, "replace path allocated {allocs} times");
+}
+
+#[test]
+fn reduce_only_and_move_only_replace_mixes_do_not_allocate() {
+    use titan_hft::types::{Command, Event};
+    use titan_hft::workload::ReplaceMix;
+    for mix in [ReplaceMix::ReduceOnly, ReplaceMix::MoveOnly] {
+        let w = WorkloadConfig {
+            commands: 600_000,
+            seed: 13,
+            replace_pct: 30,
+            replace_mix: mix,
+            ..Default::default()
+        };
+        let flow = w.generate();
+        let mut engine = MatchingEngine::new(w.book_config(1 << 17)).unwrap();
+        let mut sink = CountingSink::default();
+        let (warm, hot) = flow.split_at(flow.len() / 3);
+        for &c in warm {
+            engine.process(c, &mut sink);
+        }
+        let (_, allocs) = count(|| {
+            for &c in hot {
+                engine.process(c, &mut sink);
+            }
+        });
+        // Outside the measured window: check the mix really exercised its path.
+        let mut probe = MatchingEngine::new(w.book_config(1 << 17)).unwrap();
+        let (mut keep, mut requeue) = (0u64, 0u64);
+        let mut ev = Vec::new();
+        for &c in &flow {
+            ev.clear();
+            probe.process(c, &mut ev);
+            if let (Command::Replace { .. }, Some(Event::Replaced { kept_priority, .. })) =
+                (c, ev.first())
+            {
+                if *kept_priority {
+                    keep += 1
+                } else {
+                    requeue += 1
+                }
+            }
+        }
+        println!(
+            "{mix:?}: {} measured commands, keep={keep} requeue={requeue}, allocations = {allocs}",
+            hot.len()
+        );
+        assert_eq!(allocs, 0, "{mix:?} allocated {allocs} times");
+        match mix {
+            ReplaceMix::ReduceOnly => assert!(keep > requeue && keep > 10_000),
+            _ => assert!(requeue > 10_000 && keep * 20 < requeue),
+        }
+    }
+}
+
+#[test]
 fn cold_start_matching_does_not_allocate_either() {
     // The book is preallocated, so even the first commands should not allocate.
     let w = WorkloadConfig {
