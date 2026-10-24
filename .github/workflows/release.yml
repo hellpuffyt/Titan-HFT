@@ -23,7 +23,7 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name="titan-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="titan-dryrun-${{ matrix.target }}"
           mkdir "$name"
           cp "target/${{ matrix.target }}/release/${{ matrix.exe }}" README.md LICENSE-MIT LICENSE-APACHE "$name/"
           tar czf "$name.tar.gz" "$name"
