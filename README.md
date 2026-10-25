@@ -2,7 +2,7 @@
 
 ![CI](https://github.com/hellpuffyt/Titan-HFT/actions/workflows/ci.yml/badge.svg)
 
-**A small, deterministic order-matching engine in Rust that teaches low-latency systems engineering with code you can read in an afternoon and measurements you can reproduce.**
+**A small, deterministic single-instrument order-matching engine in Rust: a lock-free SPSC queue, a price-time-priority book that does not allocate while matching, a replayable journal, and benchmarks that state how they were measured.**
 
 [Case study ↗](https://hellpuff.dev/work/titan-hft)
 
