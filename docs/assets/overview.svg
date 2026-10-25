@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="460" viewBox="0 0 1200 460" role="img" aria-labelledby="t d">
+<title id="t">Titan-HFT data flow</title>
+<desc id="d">Commands from titan gen or a command file flow, optionally through the SPSC ring of pipeline::run, into MatchingEngine::process, which owns the OrderBook and emits events to an EventSink; the Journal records commands, events and the final state hash, and titan replay re-executes it to prove determinism.</desc>
+<defs><marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#A3AAA6"/></marker><marker id="ha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#3FBF8A"/></marker></defs>
+<rect width="1200" height="460" fill="#0C0D0D"/>
+<text x="30" y="38" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="15" fill="#EEEAE2" text-anchor="start" font-weight="600">titan-hft</text>
+<text x="128" y="38" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="13" fill="#A3AAA6" text-anchor="start" font-weight="400">one crate · single-writer engine · deterministic replay</text>
+<rect x="30" y="80" width="190" height="160" rx="8" fill="#17191A" stroke="#2A2E2D" stroke-width="1"/>
+<text x="44" y="104" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#EEEAE2" text-anchor="start" font-weight="600">command source</text>
+<text x="44" y="126" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">titan gen --seed N</text>
+<text x="44" y="143" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">(SplitMix64 workload)</text>
+<text x="44" y="160" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">or a command file:</text>
+<text x="44" y="177" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">L · M · C · R lines</text>
+<rect x="260" y="80" width="220" height="160" rx="8" fill="#17191A" stroke="#2A2E2D" stroke-width="1" stroke-dasharray="5 4"/>
+<text x="274" y="104" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#EEEAE2" text-anchor="start" font-weight="600">spsc ring</text>
+<text x="274" y="126" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">pipeline::run (library)</text>
+<text x="274" y="143" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">producer → consumer thread</text>
+<text x="274" y="160" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">Option&lt;Command&gt;, 32 B, Copy</text>
+<text x="274" y="177" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">cache-padded head / tail</text>
+<text x="274" y="194" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">back-pressure: spin, never drop</text>
+<rect x="520" y="80" width="240" height="160" rx="8" fill="#17191A" stroke="#3FBF8A" stroke-width="1.5"/>
+<text x="534" y="104" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#3FBF8A" text-anchor="start" font-weight="600">MatchingEngine::process</text>
+<text x="534" y="126" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">validate → typed reject reason</text>
+<text x="534" y="143" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">sweep opposite side (maker price)</text>
+<text x="534" y="160" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">rest the remainder, IOC cancel</text>
+<text x="534" y="177" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">no clock, RNG, locks or allocs</text>
+<rect x="800" y="80" width="170" height="160" rx="8" fill="#17191A" stroke="#2A2E2D" stroke-width="1"/>
+<text x="814" y="104" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#EEEAE2" text-anchor="start" font-weight="600">EventSink</text>
+<text x="814" y="126" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">ACK · TRADE · CXL</text>
+<text x="814" y="143" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">RPL keep / requeue</text>
+<text x="814" y="160" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">REJ &lt;reason&gt;</text>
+<text x="814" y="177" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">Vec · CountingSink</text>
+<rect x="1010" y="80" width="160" height="160" rx="8" fill="#17191A" stroke="#2A2E2D" stroke-width="1"/>
+<text x="1024" y="104" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#EEEAE2" text-anchor="start" font-weight="600">journal</text>
+<text x="1024" y="126" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">commands</text>
+<text x="1024" y="143" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">+ events</text>
+<text x="1024" y="160" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">+ FNV-1a hash</text>
+<text x="1024" y="177" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">of final book</text>
+<path d="M220 160 L258 160" fill="none" stroke="#A3AAA6" stroke-width="1.4" marker-end="url(#h)"/>
+<path d="M480 160 L518 160" fill="none" stroke="#A3AAA6" stroke-width="1.4" marker-end="url(#h)"/>
+<path d="M760 160 L798 160" fill="none" stroke="#A3AAA6" stroke-width="1.4" marker-end="url(#h)"/>
+<text x="779.0" y="153.0" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#A3AAA6" text-anchor="middle" font-weight="400">Event</text>
+<path d="M970 160 L1008 160" fill="none" stroke="#A3AAA6" stroke-width="1.4" marker-end="url(#h)"/>
+<rect x="520" y="300" width="240" height="130" rx="8" fill="#17191A" stroke="#2A2E2D" stroke-width="1"/>
+<text x="534" y="324" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#EEEAE2" text-anchor="start" font-weight="600">OrderBook</text>
+<text x="534" y="346" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">bid / ask ladder, one level per tick</text>
+<text x="534" y="363" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">non-empty bitset + cached best</text>
+<text x="534" y="380" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">intrusive FIFO over node slab</text>
+<text x="534" y="397" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">id → node index (2× capacity)</text>
+<path d="M640 240 L640 298" fill="none" stroke="#A3AAA6" stroke-width="1.4" marker-end="url(#h)"/>
+<text x="650" y="275" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#A3AAA6" text-anchor="start" font-weight="400">owns (single writer)</text>
+<rect x="800" y="300" width="370" height="130" rx="8" fill="#17191A" stroke="#2A2E2D" stroke-width="1"/>
+<text x="814" y="324" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#EEEAE2" text-anchor="start" font-weight="600">titan replay  ·  Journal::verify</text>
+<text x="814" y="346" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">re-executes every command on a fresh engine</text>
+<text x="814" y="363" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">compares each event and the final book hash</text>
+<text x="814" y="380" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">exit 0  OK: N commands, M events reproduced</text>
+<text x="814" y="397" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">exit 1  DIVERGENCE at command #k (line n)</text>
+<path d="M1090 240 L1090 298" fill="none" stroke="#A3AAA6" stroke-width="1.4" marker-end="url(#h)"/>
+<text x="1100" y="275" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="10.5" fill="#A3AAA6" text-anchor="start" font-weight="400">parse</text>
+<rect x="30" y="300" width="450" height="130" rx="8" fill="#17191A" stroke="#2A2E2D" stroke-width="1"/>
+<text x="44" y="324" font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#EEEAE2" text-anchor="start" font-weight="600">what the tests check</text>
+<text x="44" y="346" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">proptest: event-for-event vs a naive reference model</text>
+<text x="44" y="363" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">loom + Miri: SPSC memory ordering and UB</text>
+<text x="44" y="380" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">counting global allocator: 0 allocs while matching</text>
+<text x="44" y="397" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif" font-size="11.5" fill="#A3AAA6" text-anchor="start" font-weight="400">golden journals replay byte-for-byte</text>
+</svg>
