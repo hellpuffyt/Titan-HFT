@@ -2,7 +2,13 @@
 
 ![CI](https://github.com/hellpuffyt/Titan-HFT/actions/workflows/ci.yml/badge.svg)
 
-**A small, deterministic order-matching engine in Rust that teaches low-latency systems engineering with code you can read in an afternoon and measurements you can reproduce.**
+**A small, deterministic single-instrument order-matching engine in Rust: a lock-free SPSC queue, a price-time-priority book that does not allocate while matching, a replayable journal, and benchmarks that state how they were measured.**
+
+[Case study ↗](https://hellpuff.dev/work/titan-hft)
+
+<img src="docs/assets/overview.svg" width="100%" alt="Titan-HFT data flow: command source, optional SPSC ring, MatchingEngine::process owning the OrderBook, EventSink, journal with state hash, and titan replay verifying it">
+
+<sub>Diagram of the real modules (`workload`, `spsc`/`pipeline`, `engine`, `book`, `journal`, `titan` CLI). The `titan` CLI drives the engine directly; the SPSC ring is used by `pipeline::run` and the stress tests.</sub>
 
 > **Status: educational / research, v0.1.0.** Not a trading system. No exchange connectivity, no risk checks, no persistence guarantees, no claims about financial returns.
 
@@ -59,7 +65,7 @@ Expected last line (real output for seed 42, 5000 commands):
 OK: 5000 commands, 8051 events reproduced exactly; final hash 62d641d8087e8866
 ```
 
-Edit one event in the journal and `replay` exits with code 1 and pinpoints the first divergence:
+Edit one event in a journal and `replay` exits with code 1 and pinpoints the first divergence. Below, a journal of `tests/fixtures/price_time.cmds` had one `TRADE 10 3 100 5` changed to quantity 4:
 
 ```text
 DIVERGENCE: divergence at command #3 (line 9): L B 10 101 12
