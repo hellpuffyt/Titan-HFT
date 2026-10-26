@@ -6,10 +6,6 @@
 
 [Case study ↗](https://hellpuff.dev/work/titan-hft)
 
-<img src="docs/assets/overview.svg" width="100%" alt="Titan-HFT data flow: command source, optional SPSC ring, MatchingEngine::process owning the OrderBook, EventSink, journal with state hash, and titan replay verifying it">
-
-<sub>Diagram of the real modules (`workload`, `spsc`/`pipeline`, `engine`, `book`, `journal`, `titan` CLI). The `titan` CLI drives the engine directly; the SPSC ring is used by `pipeline::run` and the stress tests.</sub>
-
 > **Status: educational / research, v0.1.0.** Not a trading system. No exchange connectivity, no risk checks, no persistence guarantees, no claims about financial returns.
 
 ```console
@@ -36,6 +32,52 @@ hash d7047f180ee3c18a
 ```
 
 The bid for 12 @ 101 fills order 2 before order 3 (same price, earlier arrival), both before order 1 (worse price), and every trade prints at the **resting** order's price. The market sell fills what it can and cancels the rest (`CXL 12 6 ioc`).
+
+## Demo
+
+Terminal captures of the release `titan` binary (`cargo build --release`, run from `target/release`). The text in each image is the exact output.
+
+<img src="docs/screenshots/titan-run-price-time.png" width="100%" alt="Terminal: titan run tests/fixtures/price_time.cmds prints each command, its ACK, TRADE, CXL and REJ events, the two resting bids left on the book and the state hash d7047f180ee3c18a">
+
+<sub>`titan run tests/fixtures/price_time.cmds`: the full event stream for the fixture shown above, including the rejects (unknown order, zero quantity, duplicate id, price out of band), the final book and its hash.</sub>
+
+<img src="docs/screenshots/titan-journal-replay.png" width="100%" alt="Terminal: titan gen and run --journal on 5000 seeded commands print the top of book and hash 62d641d8087e8866, titan replay reports all 8051 events reproduced exactly, and replaying tampered.journal prints the first divergence and exits with code 1">
+
+<sub>A seeded 5000-command flow is journaled and replayed exactly; the tampered fixture journal is caught at its first divergent event and `replay` exits with code 1.</sub>
+
+```text
+$ titan gen --seed 42 --count 5000 --out flow.cmds
+$ titan run flow.cmds --quiet --journal flow.journal
+--- 5000 commands, 179 resting orders
+  ask    10034      165 (4 orders)
+  ask    10032      103 (4 orders)
+  ask    10030      127 (3 orders)
+  ask    10028       89 (1 orders)
+  ask    10024       46 (1 orders)
+  bid     9987       66 (1 orders)
+  bid     9982        3 (1 orders)
+  bid     9972       13 (1 orders)
+  bid     9971       31 (1 orders)
+  bid     9966       14 (1 orders)
+hash 62d641d8087e8866
+journal written to flow.journal
+$ titan replay flow.journal
+OK: 5000 commands, 8051 events reproduced exactly; final hash 62d641d8087e8866
+$ titan replay tests/fixtures/tampered.journal; echo "exit code $?"
+DIVERGENCE: divergence at command #3 (line 9): L B 10 101 12
+  expected:
+    < ACK 10
+    < TRADE 10 2 100 5
+    < TRADE 10 3 100 4
+    < TRADE 10 1 101 2
+  actual:
+    < ACK 10
+    < TRADE 10 2 100 5
+    < TRADE 10 3 100 5
+    < TRADE 10 1 101 2
+
+exit code 1
+```
 
 ## Why this exists
 
@@ -101,6 +143,10 @@ Requires Rust 1.86+ (edition 2024; `rust-version = "1.86"` in Cargo.toml, set by
 - Self-trade prevention, multiple instruments, binary journal format, core pinning in the harness.
 
 ## Architecture
+
+<img src="docs/assets/overview.svg" width="100%" alt="Titan-HFT data flow: command source, optional SPSC ring, MatchingEngine::process owning the OrderBook, EventSink, journal with state hash, and titan replay verifying it">
+
+<sub>Diagram of the real modules (`workload`, `spsc`/`pipeline`, `engine`, `book`, `journal`, `titan` CLI). The `titan` CLI drives the engine directly; the SPSC ring is used by `pipeline::run` and the stress tests.</sub>
 
 ```mermaid
 flowchart LR
